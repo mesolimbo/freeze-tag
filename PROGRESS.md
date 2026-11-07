@@ -48,7 +48,9 @@ Download output from node 322, the `Save3DAdvanced` GLB, into `assets/models_raw
 - [x] Kid rigged with `idle`, `walk`, `run` and `frozen` clips by `tools/rig_kid.py` (`assets/blends_low/kid_rigged.blend`). Exports to `assets/game/kid.glb` plus `kid_<name>.webp` and `kid_<name>_frozen.webp` per kid (frozen textures come from `tools/freeze_kid_textures.py`). Tested in three.js with `tools/kid_preview.html`.
 - [x] Playable build in `game/` (Vite, relative URLs for itch.io), copied from `raw/` with the Playground SDK stubbed and Rapier removed. Assets: `park.glb` from `tools/export_scene_glb.py`, kid files from `assets/game`.
 - [x] `python tools/package_itch.py` zips `game/dist` to `game/release/park-freeze-tag-itch.zip`
-- [x] Ice is a faceted shell around the frozen pose (`tools/build_ice_shell.py`), freeze radius 3.2 m, not yet play-tested
+- [x] Ice is rough cubes around the frozen pose (`tools/build_ice_shell.py`, then `tools/build_ice_blocks.py`), freeze radius 3.2 m, not yet play-tested
 - [ ] Before publishing: replace the Google-hosted music, upload to itch.io
 
 Constraint: GitHub Game Off entry on the theme "Shift", so Left and Right Shift stay the only keys.
+
+Memory target: playable on 4 GB of RAM, 8 GB at minimum. Keep the browser's total private memory near 1 GB during play. Bloom is removed and pixel ratio is capped for this reason. Rendering has no tone mapping, and lights are balanced for that.

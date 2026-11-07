@@ -17,6 +17,7 @@ TILE_METRES = 6
 PLAY_RADIUS = 10.56
 RIM_INNER_RADIUS = 9.6
 GROUND_SINK = 0.02
+TREE_SINK = 0.04
 
 # Prop, (x, y, z), z rotation in radians, scale.
 EQUIPMENT = [
@@ -46,7 +47,7 @@ def playground_collection():
     return col
 
 
-def place(col, prop, location, rotation, scale=1.0, label=None):
+def place(col, prop, location, rotation, scale=1.0, label=None, sink=GROUND_SINK):
     source = bpy.data.objects[f"P_{prop}"]
     ob = bpy.data.objects.new(label or prop, source.data)
     col.objects.link(ob)
@@ -54,7 +55,7 @@ def place(col, prop, location, rotation, scale=1.0, label=None):
     if location[2] == 0:
         # Remeshing moves the lowest point, so sit each prop just into the ground instead of trusting z=0.
         lowest = min(v.co.z for v in source.data.vertices)
-        ob.location.z = -lowest * scale - GROUND_SINK
+        ob.location.z = -lowest * scale - sink
     ob.rotation_euler = (0, 0, rotation)
     ob.scale = (scale, scale, scale)
     return ob
@@ -276,7 +277,7 @@ def add_fence(col):
 def add_trees(col):
     rng = random.Random(7)
     for x, game_z in TREE_SPOTS:
-        place(col, "tree", (x, -game_z, 0), rng.uniform(0, math.tau), rng.uniform(0.92, 1.08))
+        place(col, "tree", (x, -game_z, 0), rng.uniform(0, math.tau), rng.uniform(0.92, 1.08), sink=TREE_SINK)
 
 
 def setup_world():

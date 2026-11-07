@@ -1,5 +1,4 @@
 import {Canvas, useFrame, useLoader, useThree} from '@react-three/fiber';
-import {Bloom, EffectComposer} from '@react-three/postprocessing';
 import React, {Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -205,12 +204,12 @@ function ParkScene() {
   return <primitive object={gltf.scene} />;
 }
 
-const ICE_SHELL_URL = `${import.meta.env.BASE_URL}assets/ice_shell.glb`;
-useLoader.preload(GLTFLoader, ICE_SHELL_URL);
+const ICE_BLOCKS_URL = `${import.meta.env.BASE_URL}assets/ice_blocks.glb`;
+useLoader.preload(GLTFLoader, ICE_BLOCKS_URL);
 
-/** Ice formed around the frozen pose. The shell was modelled from that pose, so it shares the kid's origin. */
+/** Rough ice cubes formed around the frozen pose, built from that pose so they share the kid's origin. */
 function IceBlock({isFrozen}: {isFrozen: boolean}) {
-  const gltf = useLoader(GLTFLoader, ICE_SHELL_URL);
+  const gltf = useLoader(GLTFLoader, ICE_BLOCKS_URL);
   const geometry = useMemo(() => {
     let found: THREE.BufferGeometry | null = null;
     gltf.scene.traverse((node) => {
@@ -614,6 +613,10 @@ function AtmosphericPollen() {
   );
 }
 
+// Reported by Chromium browsers only, and capped at 8. Elsewhere the higher limit applies.
+const DEVICE_MEMORY_GB = (navigator as Navigator & {deviceMemory?: number}).deviceMemory ?? 8;
+const MAX_PIXEL_RATIO: [number, number] = [1, DEVICE_MEMORY_GB <= 4 ? 1 : 1.5];
+
 export function Game({
   isPlaying,
   isPaused,
@@ -627,11 +630,15 @@ export function Game({
     <div className="w-full h-full relative canvas-wrapper">
       <Canvas
         shadows="percentage"
-        dpr={[1, 1.5]}
+        dpr={MAX_PIXEL_RATIO}
+        onCreated={({gl}) => {
+          // The ice pass redraws the whole scene into its own buffer. Below this, the frozen kid looks blurred.
+          gl.transmissionResolutionScale = DEVICE_MEMORY_GB <= 4 ? 0.5 : 0.75;
+        }}
         gl={{
           antialias: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          // The textures and lights are balanced to display as they are, without a filmic curve.
+          toneMapping: THREE.NoToneMapping,
         }}
         camera={{
           fov: getConfig('fov'),
@@ -682,10 +689,6 @@ export function Game({
           />
 
           <AtmosphericPollen />
-
-          <EffectComposer>
-            <Bloom luminanceThreshold={0.9} luminanceSmoothing={0.3} intensity={0.4} />
-          </EffectComposer>
         </Suspense>
       </Canvas>
     </div>

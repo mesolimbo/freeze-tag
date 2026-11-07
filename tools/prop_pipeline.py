@@ -16,6 +16,8 @@ ALIGN_FILE = ROOT + "/assets/props_align.json"
 BLENDS = ROOT + "/assets/blends"
 MAIN_FILE = ROOT + "/models.blend"
 QR_INPUT_FACES = 120000
+ROOT_PLATE_SHARE = 0.09
+ROOT_BLEND_END = 0.26
 LINK_PITCH = 0.115
 LINK_SEGMENTS = 8
 LINK_HALF_WIDTH = 0.042
@@ -196,6 +198,36 @@ def crop_box(ob, crop):
     mesh.update()
 
 
+def level_roots(mesh):
+    """Flatten a root plate left sloping by the reconstruction's camera angle. The trunk above stays as it is."""
+    coords = np.empty(len(mesh.vertices) * 3, dtype=np.float64)
+    mesh.vertices.foreach_get("co", coords)
+    coords = coords.reshape(-1, 3)
+    bottom = coords[:, 2].min()
+    height = coords[:, 2].max() - bottom
+    plate = coords[coords[:, 2] < bottom + height * ROOT_PLATE_SHARE]
+    # Fit the plane to the underside: the lowest point in each patch of the plate.
+    lowest = {}
+    for x, y, z in plate:
+        key = (round(x / 0.25), round(y / 0.25))
+        if key not in lowest or z < lowest[key][2]:
+            lowest[key] = (x, y, z)
+    samples = np.array(list(lowest.values()))
+    design = np.column_stack([samples[:, 0], samples[:, 1], np.ones(len(samples))])
+    slope_x, slope_y, offset = np.linalg.lstsq(design, samples[:, 2], rcond=None)[0]
+    plane = slope_x * coords[:, 0] + slope_y * coords[:, 1] + offset
+    # Full correction through the plate, fading to none by the time the trunk is clear of the flare.
+    start, end = bottom + height * ROOT_PLATE_SHARE, bottom + height * ROOT_BLEND_END
+    t = np.clip((coords[:, 2] - start) / (end - start), 0, 1)
+    coords[:, 2] -= plane * (1 - t * t * (3 - 2 * t))
+    # Tips that still dip below the plane rest on the ground.
+    coords[:, 2] = np.maximum(coords[:, 2], 0)
+    mesh.vertices.foreach_set("co", coords.ravel())
+    mesh.update()
+    bpy.context.view_layer.update()
+    print("root plate slope", round(math.degrees(math.atan(math.hypot(slope_x, slope_y))), 1), "degrees")
+
+
 def fit(ob, name):
     """Bake the rotation and scale into the mesh. Origin ends at the base centre, z=0 at the bottom."""
     mesh = ob.data
@@ -225,6 +257,8 @@ def fit(ob, name):
     mesh.vertices.foreach_set("co", coords.ravel())
     mesh.update()
     bpy.context.view_layer.update()
+    if spec.get("level_roots"):
+        level_roots(mesh)
 
 
 def assets_collection():
@@ -445,7 +479,7 @@ def merge_props(names):
 
 KID_VARIANTS = ("leo", "maya", "sam", "zoe", "toby")
 LOW_PROFILE = {
-    "tree": {"quads": 1800, "tex": 1024, "cage": 0.2, "ray": 0.7, "sharp": None, "voxel": 0.09, "bake_from_detailed": True},
+    "tree": {"quads": 3500, "tex": 1024, "cage": 0.2, "ray": 0.7, "sharp": None, "voxel": 0.08, "bake_from_detailed": True, "level_roots": True},
     "bench": {"quads": 400, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60},
     "fence": {"quads": 120, "tex": 1024, "cage": 0.06, "ray": 0.25, "sharp": 60, "handmade": True},
     "tower_red": {"quads": 2200, "tex": 1024, "cage": 0.06, "ray": 0.2, "sharp": 60, "bake_from_detailed": True},
@@ -480,6 +514,8 @@ def swap_in_detailed_source(name, high):
         target.objects = [f"P_{name}"]
     detailed = target.objects[0]
     bpy.context.scene.collection.objects.link(detailed)
+    if PROPS[name].get("level_roots"):
+        level_roots(detailed.data)
     for node in detailed.data.materials[0].node_tree.nodes:
         # new_image reuses these names for the low-poly bake targets.
         if node.type == "TEX_IMAGE":
