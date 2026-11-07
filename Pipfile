@@ -8,6 +8,8 @@ numpy = "*"
 pillow = "*"
 
 [dev-packages]
+miniaudio = "*"
+lameenc = "*"
 
 [requires]
 python_version = "3.13"

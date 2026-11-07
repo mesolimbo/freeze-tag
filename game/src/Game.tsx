@@ -609,6 +609,11 @@ function FreezeAuraVisual({playerPosRef}: {playerPosRef: React.MutableRefObject<
   );
 }
 
+/** How quickly the turn speed follows the keys (per second): about 0.1 s to get most of the way there. */
+const TURN_RESPONSE = 10;
+/** Camera roll (radians) at full turn speed. */
+const TURN_BANK = 0.05;
+
 /**
  * Keyboard-Only Shift-Steering Auto-Forward Controller:
  * Always drives forward. Left Shift turns left, Right Shift turns right.
@@ -660,6 +665,8 @@ function ShiftSteeringController({
   }, []);
 
   const stepTimer = useRef(0);
+  /** Current turn speed (radians per second), eased toward what the keys ask for. */
+  const turnVelocity = useRef(0);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -668,6 +675,7 @@ function ShiftSteeringController({
       camera.position.set(playerPosRef.current.x, 1.6, playerPosRef.current.z);
       camera.rotation.order = 'YXZ';
       camera.rotation.set(-0.06, playerPosRef.current.yaw, 0);
+      turnVelocity.current = 0;
       return;
     }
 
@@ -676,7 +684,9 @@ function ShiftSteeringController({
     const steering = held.current[held.current.length - 1];
     const turnInput = steering === 'ShiftLeft' ? 1 : steering === 'ShiftRight' ? -1 : 0;
 
-    playerPosRef.current.yaw += turnInput * turnRate * dt;
+    // Ease into and out of turns instead of snapping to full speed, which reads as a jolt on every tap.
+    turnVelocity.current += (turnInput * turnRate - turnVelocity.current) * (1 - Math.exp(-TURN_RESPONSE * dt));
+    playerPosRef.current.yaw += turnVelocity.current * dt;
 
     // Always moving forward in direction of yaw
     const forwardSpeed = getConfig('playerSpeed');
@@ -726,11 +736,8 @@ function ShiftSteeringController({
     camera.rotation.order = 'YXZ';
     camera.rotation.y = yaw;
     camera.rotation.x = -0.06; // slight downward tilt to see runners and freeze aura
-    camera.rotation.z = THREE.MathUtils.lerp(
-      camera.rotation.z,
-      turnInput * -0.06,
-      8 * dt
-    ); // dynamic bank roll on turn
+    // Bank with the eased turn speed, so the tilt rises and settles with the turn rather than with the key.
+    camera.rotation.z = (-TURN_BANK * turnVelocity.current) / turnRate;
 
     // Freeze Radius Check (Automatic tag when within freeze radius)
     const radius = getConfig('freezeRadius');
@@ -862,6 +869,15 @@ export function Game({
       >
         <fog attach="fog" args={[SKY_HORIZON, FOG_NEAR, FOG_FAR]} />
         <Suspense fallback={null}>
+          {/* Frame callbacks run in mount order, so the player moves first and everything that follows it
+              (the freeze ring, the sun's shadow camera, the kids) reads this frame's position, not the last one. */}
+          <ShiftSteeringController
+            isPlaying={isPlaying}
+            isPaused={isPaused}
+            playerPosRef={playerPosRef}
+            kidsPosRef={kidsPosRef}
+            onFreezeKid={onFreezeKid}
+          />
           <SkyDome />
           <ambientLight
             color={getConfig('ambientColor')}
@@ -891,14 +907,6 @@ export function Game({
           {/* Freeze Aura ring around player */}
           <FreezeAuraVisual playerPosRef={playerPosRef} />
 
-          {/* Shift Keys Steer Controller */}
-          <ShiftSteeringController
-            isPlaying={isPlaying}
-            isPaused={isPaused}
-            playerPosRef={playerPosRef}
-            kidsPosRef={kidsPosRef}
-            onFreezeKid={onFreezeKid}
-          />
 
           <AtmosphericPollen />
           <ReadySignal onReady={onReady} />

@@ -1,7 +1,7 @@
 import {ArrowLeft, ArrowRight, Volume2, VolumeX} from 'lucide-react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {getConfig} from './constants';
+import {getConfig, MUSIC_LOOP} from './constants';
 import {Game, KIDS_CONFIG} from './Game';
 import BackgroundMusic from './utils/BackgroundMusic';
 import {gameAudio} from './utils/helper';
@@ -11,7 +11,8 @@ const SPAWN_INSET = 19;
 const EYE_HEIGHT = 1.6;
 /** After a round ends, ignore keys this long so a key still held from play does not skip the result. */
 const RESTART_DELAY_MS = 900;
-const TICK_MS = 100;
+/** Fast enough that the tenths digit never visibly skips. */
+const TICK_MS = 50;
 const URGENT_SECONDS = 5;
 /** Matches the opacity transition on #splash in index.html. */
 const SPLASH_FADE_MS = 700;
@@ -117,7 +118,12 @@ function outline(color: string, width: string) {
   return {WebkitTextStroke: `${width} ${color}`, paintOrder: 'stroke fill'} as const;
 }
 
-function ResultScreen({won}: {won: boolean}) {
+/** Seconds to one decimal, rounded up so the clock reads 20.0 at the start and only shows 0.0 once time is up. */
+function formatSeconds(seconds: number) {
+  return (Math.ceil(seconds * 10 - 1e-6) / 10).toFixed(1);
+}
+
+function ResultScreen({won, secondsLeft}: {won: boolean; secondsLeft: number}) {
   const stroke = won ? '#1e3a8a' : '#7f1d1d';
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 px-4 text-center font-fun text-white">
@@ -126,6 +132,11 @@ function ResultScreen({won}: {won: boolean}) {
         style={outline(stroke, '0.12em')}>
         {won ? 'You Win!' : 'You Lost!'}
       </div>
+      {won && (
+        <div className="text-3xl tracking-wide sm:text-5xl" style={outline(stroke, '0.16em')}>
+          with <span className="tabular-nums">{formatSeconds(secondsLeft)}</span> seconds to spare!
+        </div>
+      )}
       <div className="text-2xl tracking-wide sm:text-3xl" style={outline(stroke, '0.18em')}>
         Press any key to continue
       </div>
@@ -133,12 +144,22 @@ function ResultScreen({won}: {won: boolean}) {
   );
 }
 
-function StatusLine({secondsLeft, playing}: {secondsLeft: number; playing: boolean}) {
+function StatusLine({secondsLeft, kidsLeft, playing}: {secondsLeft: number; kidsLeft: number; playing: boolean}) {
   const urgent = playing && secondsLeft <= URGENT_SECONDS;
+  const count = <span className="tabular-nums font-black text-red-500">{kidsLeft}</span>;
   return (
     <>
-      <span className={`tabular-nums font-black text-red-500 ${urgent ? 'animate-pulse' : ''}`}>{secondsLeft}</span>{' '}
-      {secondsLeft === 1 ? 'second' : 'seconds'} to catch all the kids!
+      <span className={`tabular-nums font-black text-red-500 ${urgent ? 'animate-pulse' : ''}`}>
+        {formatSeconds(secondsLeft)}
+      </span>{' '}
+      seconds to catch{' '}
+      {kidsLeft === KIDS_CONFIG.length ? (
+        <>all {count} kids!</>
+      ) : kidsLeft === 1 ? (
+        <>the last kid!</>
+      ) : (
+        <>{count} more kids!</>
+      )}
     </>
   );
 }
@@ -163,19 +184,36 @@ export default function App() {
   const playerPosRef = useRef(randomCornerSpawn());
   const kidsPosRef = useRef(startingKids());
 
+  // The clock reads real elapsed time rather than counting interval ticks, which drift visibly once tenths show.
+  const roundStartedAt = useRef(0);
+  const roundOverRef = useRef(true);
+  const secondsLeftNow = useCallback(
+    () => Math.max(0, timeLimit - (performance.now() - roundStartedAt.current) / 1000),
+    [timeLimit],
+  );
+
   const startRound = useCallback(() => {
     playerPosRef.current = randomCornerSpawn();
     kidsPosRef.current = startingKids();
     setFrozenKids(KIDS_CONFIG.map(() => false));
+    roundStartedAt.current = performance.now();
+    roundOverRef.current = false;
     setTimeRemaining(timeLimit);
     setStatus('PLAYING');
     setMusicStarted(true);
   }, [timeLimit]);
 
-  const endRound = useCallback((result: Status) => {
-    endedAt.current = performance.now();
-    setStatus(result);
-  }, []);
+  const endRound = useCallback(
+    (result: Status) => {
+      // The last catch and the clock running out can land on the same tick; the first one decides the round.
+      if (roundOverRef.current) return;
+      roundOverRef.current = true;
+      endedAt.current = performance.now();
+      setTimeRemaining(result === 'TIME_UP' ? 0 : secondsLeftNow());
+      setStatus(result);
+    },
+    [secondsLeftNow],
+  );
 
   // The splash lives in index.html so it shows while the bundle downloads. Once the scene is ready, Space fades it
   // out and the clock starts the moment it is gone. Space rather than Shift: Chrome ignores modifier keys when
@@ -245,16 +283,14 @@ export default function App() {
   useEffect(() => {
     if (status !== 'PLAYING') return;
     const timer = setInterval(() => {
-      setTimeRemaining((previous) => {
-        const next = Math.max(0, previous - TICK_MS / 1000);
-        if (next === 0) endRound('TIME_UP');
-        return next;
-      });
+      const left = secondsLeftNow();
+      if (left === 0) endRound('TIME_UP');
+      else setTimeRemaining(left);
     }, TICK_MS);
     return () => clearInterval(timer);
-  }, [status, endRound]);
+  }, [status, endRound, secondsLeftNow]);
 
-  const secondsLeft = Math.ceil(timeRemaining - 1e-6);
+  const secondsLeft = timeRemaining;
   const roundOver = status === 'CAUGHT_ALL' || status === 'TIME_UP';
 
   return (
@@ -265,6 +301,7 @@ export default function App() {
         isMuted={musicMuted}
         volume={getConfig('defaultMusicVolume')}
         onBlockedChange={setAudioBlocked}
+        preparedLoop={MUSIC_LOOP}
       />
       {/* The splash is outside the React tree at z-50, so the prompt and the mute button go in a layer above it. */}
       {createPortal(
@@ -296,7 +333,7 @@ export default function App() {
       />
 
       {roundOver ? (
-        <ResultScreen won={status === 'CAUGHT_ALL'} />
+        <ResultScreen won={status === 'CAUGHT_ALL'} secondsLeft={secondsLeft} />
       ) : (
         <div
           className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 bg-black/35 px-4 py-3 backdrop-blur-sm sm:px-8"
@@ -305,7 +342,11 @@ export default function App() {
           <div
             className="min-w-0 flex-1 text-center text-lg font-bold text-red-400 sm:text-2xl"
             style={outline('#000', '0.2em')}>
-            <StatusLine secondsLeft={secondsLeft} playing={status === 'PLAYING'} />
+            <StatusLine
+              secondsLeft={secondsLeft}
+              kidsLeft={frozenKids.filter((frozen) => !frozen).length}
+              playing={status === 'PLAYING'}
+            />
           </div>
           <SideControl side="right" pressed={pressed.right} />
         </div>

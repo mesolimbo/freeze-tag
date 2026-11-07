@@ -239,3 +239,9 @@ export function getConfig<K extends ConfigKey>(
 ): (typeof CONFIG)[K]['value'] {
   return CONFIG[key].value;
 }
+
+/**
+ * Loop points for the bundled music, printed by tools/make_music_loop.py when it built music.mp3: 28 bars at
+ * 140 BPM after one second of wrap-around padding. Rerun the tool and update these if the track changes.
+ */
+export const MUSIC_LOOP = {leadSec: 1.0, lengthSec: 47.99657596371882} as const;

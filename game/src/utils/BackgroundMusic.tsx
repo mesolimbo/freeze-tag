@@ -14,6 +14,8 @@ export interface BackgroundMusicProps {
   readonly volume?: number;
   /** Reports whether the browser is holding audio back until the player clicks, taps or presses a key. */
   readonly onBlockedChange?: (blocked: boolean) => void;
+  /** Exact loop points for a track prepared offline. Without it, the track's tail is crossfaded into its head. */
+  readonly preparedLoop?: PreparedLoop;
 }
 
 /**
@@ -38,6 +40,17 @@ export interface SeamlessLoopResult {
   readonly loopStartSec: number;
   /** Loop end offset in seconds where playback turnaround occurs. */
   readonly loopEndSec: number;
+  /** Where playback first starts, in seconds. Defaults to 0. */
+  readonly playFromSec?: number;
+}
+
+/**
+ * A loop already cut to length offline (see tools/make_music_loop.py): the audible audio starts with `leadSec` of
+ * padding, then the loop runs for exactly `lengthSec`. Playback loops inside the padding with no crossfade.
+ */
+export interface PreparedLoop {
+  readonly leadSec: number;
+  readonly lengthSec: number;
 }
 
 interface WindowWithWebkitAudio extends Window {
@@ -239,7 +252,10 @@ export function BackgroundMusic({
   isMuted = false,
   volume = DEFAULT_VOLUME,
   onBlockedChange,
+  preparedLoop,
 }: BackgroundMusicProps): React.ReactElement | null {
+  const preparedLoopRef = useRef(preparedLoop);
+  preparedLoopRef.current = preparedLoop;
   const onBlockedChangeRef = useRef(onBlockedChange);
   onBlockedChangeRef.current = onBlockedChange;
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -411,7 +427,7 @@ export function BackgroundMusic({
       }
     };
 
-    source.start(0);
+    source.start(0, loopResult.playFromSec ?? 0);
     sourceNodeRef.current = source;
     trackGainRef.current = trackGain;
   };
@@ -449,12 +465,25 @@ export function BackgroundMusic({
         const ctx = getOrCreateContext();
         if (!ctx) return;
         const boundaries = scanAudioBoundaries(decodedBuffer);
-        loopResultRef.current = createSeamlessLoopBuffer(
-          ctx,
-          decodedBuffer,
-          boundaries,
-          DEFAULT_CROSSFADE_SEC,
-        );
+        const prepared = preparedLoopRef.current;
+        if (prepared) {
+          // The padding before the loop is the loop's own tail, so it does not matter whether the detected start
+          // lands a few milliseconds early: the region is the right length and the audio around it is continuous.
+          const loopStartSec = boundaries.startSample / decodedBuffer.sampleRate + prepared.leadSec;
+          loopResultRef.current = {
+            buffer: decodedBuffer,
+            loopStartSec,
+            loopEndSec: loopStartSec + prepared.lengthSec,
+            playFromSec: loopStartSec,
+          };
+        } else {
+          loopResultRef.current = createSeamlessLoopBuffer(
+            ctx,
+            decodedBuffer,
+            boundaries,
+            DEFAULT_CROSSFADE_SEC,
+          );
+        }
         if (isPlayingRef.current) {
           startWebAudioLoop();
         }
