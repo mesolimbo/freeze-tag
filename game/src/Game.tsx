@@ -606,7 +606,13 @@ function ShiftSteeringController({
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
-    if (!isPlaying || isPaused) return;
+    if (!isPlaying || isPaused) {
+      // Between rounds there is no menu, so hold the view at the player's spot instead of a default camera.
+      camera.position.set(playerPosRef.current.x, 1.6, playerPosRef.current.z);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.set(-0.06, playerPosRef.current.yaw, 0);
+      return;
+    }
 
     const turnRate = getConfig('playerTurnRate');
     let turnInput = 0;

@@ -1,1 +1,18 @@
+@import "@fontsource/luckiest-guy/latin-400.css";
 @import "tailwindcss";
+
+@theme {
+  --font-fun: "Luckiest Guy", "Comic Sans MS", "Chalkboard SE", system-ui, sans-serif;
+
+  --animate-blink-slow: blink-slow 1.6s ease-in-out infinite;
+
+  @keyframes blink-slow {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.25;
+    }
+  }
+}
