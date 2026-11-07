@@ -5,6 +5,7 @@ import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {KidCharacter, type KidName, preloadKids} from './components/KidCharacter';
 import {getConfig} from './constants';
 import {gameAudio} from './utils/helper';
+import {touchSide} from './utils/touch';
 
 export interface KidData {
   id: number;
@@ -649,17 +650,39 @@ function ShiftSteeringController({
       // Once the browser reports no Shift down at all, drop both.
       held.current = e.getModifierState('Shift') ? held.current.filter((c) => c !== e.code) : [];
     };
+    // On touch screens a finger on either half of the screen acts as that side's Shift key.
+    const touches = new Map<number, 'ShiftLeft' | 'ShiftRight'>();
+    const onPointerDown = (e: PointerEvent) => {
+      const side = touchSide(e);
+      if (!side) return;
+      const code = side === 'left' ? 'ShiftLeft' : 'ShiftRight';
+      touches.set(e.pointerId, code);
+      held.current = [...held.current.filter((c) => c !== code), code];
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      const code = touches.get(e.pointerId);
+      if (!code) return;
+      touches.delete(e.pointerId);
+      if (![...touches.values()].includes(code)) held.current = held.current.filter((c) => c !== code);
+    };
     // A system dialog (such as the Sticky Keys prompt after five Shift taps) can swallow the keyup.
     const onBlur = () => {
       held.current = [];
+      touches.clear();
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('blur', onBlur);
     };
   }, []);

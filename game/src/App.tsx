@@ -5,6 +5,7 @@ import {getConfig, MUSIC_LOOP} from './constants';
 import {Game, KIDS_CONFIG} from './Game';
 import BackgroundMusic from './utils/BackgroundMusic';
 import {gameAudio} from './utils/helper';
+import {IS_TOUCH_DEVICE, touchSide} from './utils/touch';
 
 /** Distance of each spawn corner from the centre on both axes, inside the fence and clear of the corner trees. */
 const SPAWN_INSET = 19;
@@ -45,7 +46,7 @@ function MuteButton({muted, blocked, onToggle}: {muted: boolean; blocked: boolea
       }`}
       style={{top: 'calc(4.25rem + env(safe-area-inset-top, 0px))', color: MUTE_ICON_COLOR}}>
       {/* Chrome ignores Shift when deciding whether a page may play sound, so a Shift-only player needs this hint. */}
-      {blocked && <span className="text-sm font-bold">Click for music</span>}
+      {blocked && <span className="text-sm font-bold">{IS_TOUCH_DEVICE ? 'Tap' : 'Click'} for music</span>}
       <Icon size={22} strokeWidth={2.5} />
     </button>
   );
@@ -62,7 +63,7 @@ function SplashPrompt({ready, onStart}: {ready: boolean; onStart: () => void}) {
       <div
         className={`text-center text-3xl tracking-wide sm:text-5xl ${ready ? 'animate-blink-slow' : 'opacity-80'}`}
         style={outline('#1e3a8a', '0.18em')}>
-        {ready ? 'Press Space to start' : 'Loading…'}
+        {ready ? (IS_TOUCH_DEVICE ? 'Tap to start' : 'Press Space to start') : 'Loading…'}
       </div>
     </div>
   );
@@ -86,6 +87,7 @@ function startingKids() {
   return KIDS_CONFIG.map((k) => ({x: k.initialPos[0], y: k.initialPos[1], z: k.initialPos[2], isFrozen: false}));
 }
 
+/** The control hint: a Shift keycap on desktop, a "tap" keycap of the same look on touch screens. */
 function ShiftKey({pressed}: {pressed: boolean}) {
   return (
     <span
@@ -94,8 +96,14 @@ function ShiftKey({pressed}: {pressed: boolean}) {
           ? 'translate-y-px border-cyan-200 bg-cyan-300 text-slate-900 shadow-[0_1px_0_#0e7490]'
           : 'border-white/70 bg-white/90 text-slate-900 shadow-[0_3px_0_#94a3b8]'
       }`}>
-      <span aria-hidden>⇧</span>
-      shift
+      {IS_TOUCH_DEVICE ? (
+        'tap'
+      ) : (
+        <>
+          <span aria-hidden>⇧</span>
+          shift
+        </>
+      )}
     </span>
   );
 }
@@ -138,7 +146,7 @@ function ResultScreen({won, secondsLeft}: {won: boolean; secondsLeft: number}) {
         </div>
       )}
       <div className="text-2xl tracking-wide sm:text-3xl" style={outline(stroke, '0.18em')}>
-        Press any key to continue
+        {IS_TOUCH_DEVICE ? 'Tap to continue' : 'Press any key to continue'}
       </div>
     </div>
   );
@@ -229,6 +237,9 @@ export default function App() {
     }, SPLASH_FADE_MS);
   }, [startRound]);
 
+  // Fingers currently on the screen and the side each one holds; kept across re-subscriptions of the listeners below.
+  const touchesRef = useRef(new Map<number, Side>());
+
   // Space leaves the splash. Shift steers (in Game). On the result screen any key starts the next round.
   useEffect(() => {
     const sideOf = (e: KeyboardEvent): Side | null =>
@@ -251,13 +262,39 @@ export default function App() {
       // Same Windows quirk as the steering: with no Shift down any more, clear both keycaps.
       setPressed((p) => (e.getModifierState('Shift') ? {...p, [side]: false} : {left: false, right: false}));
     };
-    const onBlur = () => setPressed({left: false, right: false});
+    // Touch screens: light the side being held, and a tap on the result screen starts the next round.
+    const touches = touchesRef.current;
+    const onPointerDown = (e: PointerEvent) => {
+      const side = touchSide(e);
+      if (!side) return;
+      touches.set(e.pointerId, side);
+      setPressed((p) => (p[side] ? p : {...p, [side]: true}));
+      if ((status === 'CAUGHT_ALL' || status === 'TIME_UP') && performance.now() - endedAt.current > RESTART_DELAY_MS) {
+        startRound();
+      }
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      const side = touches.get(e.pointerId);
+      if (!side) return;
+      touches.delete(e.pointerId);
+      if (![...touches.values()].includes(side)) setPressed((p) => ({...p, [side]: false}));
+    };
+    const onBlur = () => {
+      touches.clear();
+      setPressed({left: false, right: false});
+    };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('blur', onBlur);
     };
   }, [status, startRound, ready, started, leaveSplash]);
