@@ -16,6 +16,13 @@ ALIGN_FILE = ROOT + "/assets/props_align.json"
 BLENDS = ROOT + "/assets/blends"
 MAIN_FILE = ROOT + "/models.blend"
 QR_INPUT_FACES = 120000
+LINK_PITCH = 0.115
+LINK_SEGMENTS = 8
+LINK_HALF_WIDTH = 0.042
+LINK_HALF_LENGTH = 0.072
+LINK_TUBE = 0.014
+FENCE_POST_SIDES = 12
+FENCE_RAIL_SIDES = 6
 ADAPT_QUADS = True
 UV_MARGIN = 0.004
 
@@ -247,6 +254,10 @@ def start_remesh(name, voxel_scale=1.0):
     spec = PROPS[name]
     hi = import_raw(name)
     fit(hi, name)
+    if spec.get("handmade") and not ADAPT_QUADS:
+        build_fence_low(hi)
+        print("voxel faces 0 input faces 0 handmade")
+        return
     vox = hi.copy()
     vox.data = hi.data.copy()
     vox.name = vox.data.name = f"{name}_Voxel"
@@ -313,8 +324,7 @@ def finish_remesh(name):
     low.name = low.data.name = f"P_{name}"
     if spec.get("bake_from_detailed"):
         hi = swap_in_detailed_source(name, hi)
-    if spec.get("chains"):
-        rebuild_chains(low, hi)
+    chain_lines = rebuild_chains(low, hi) if spec.get("chains") else None
     select_only(low)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
@@ -346,7 +356,7 @@ def finish_remesh(name):
     tree.nodes.clear()
     output = tree.nodes.new("ShaderNodeOutputMaterial")
     bsdf = tree.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.inputs["Roughness"].default_value = 0.6
+    bsdf.inputs["Roughness"].default_value = 0.95
     tex_a = tree.nodes.new("ShaderNodeTexImage")
     tex_a.image = albedo
     tex_a.name = "albedo"
@@ -383,12 +393,16 @@ def finish_remesh(name):
         image.save()
     scene.render.engine = saved_engine
 
+    if chain_lines:
+        add_chain_links(low, *chain_lines)
     col = assets_collection()
     for owner in list(low.users_collection):
         owner.objects.unlink(low)
     col.objects.link(low)
     bpy.data.objects.remove(hi)
-    bpy.data.objects.remove(bpy.data.objects[f"{name}_Voxel"])
+    voxel = bpy.data.objects.get(f"{name}_Voxel")
+    if voxel:
+        bpy.data.objects.remove(voxel)
     bpy.data.materials.remove(source)
     bpy.ops.outliner.orphans_purge(do_recursive=True)
     print(name, "faces", len(low.data.polygons), [round(v, 2) for v in low.dimensions])
@@ -431,17 +445,17 @@ def merge_props(names):
 
 KID_VARIANTS = ("leo", "maya", "sam", "zoe", "toby")
 LOW_PROFILE = {
-    "tree": {"quads": 800, "tex": 1024, "cage": 0.3, "ray": 0.9, "sharp": None, "voxel": 0.15},
+    "tree": {"quads": 1800, "tex": 1024, "cage": 0.2, "ray": 0.7, "sharp": None, "voxel": 0.09, "bake_from_detailed": True},
     "bench": {"quads": 400, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60},
-    "fence": {"quads": 120, "tex": 512, "cage": 0.04, "ray": 0.2, "sharp": 60},
+    "fence": {"quads": 120, "tex": 1024, "cage": 0.06, "ray": 0.25, "sharp": 60, "handmade": True},
     "tower_red": {"quads": 2200, "tex": 1024, "cage": 0.06, "ray": 0.2, "sharp": 60, "bake_from_detailed": True},
     "tower_blue": {"quads": 1500, "tex": 1024, "cage": 0.05, "ray": 0.25, "sharp": 60},
     "bridge": {"quads": 150, "tex": 512, "cage": 0.04, "ray": 0.2, "sharp": 60},
     "slide": {"quads": 300, "tex": 1024, "cage": 0.04, "ray": 0.2, "sharp": 60},
     "stairs": {"quads": 300, "tex": 512, "cage": 0.06, "ray": 0.3, "sharp": 60},
-    "swing": {"quads": 800, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60, "chains": True},
-    "seesaw": {"quads": 300, "tex": 512, "cage": 0.04, "ray": 0.2, "sharp": 60},
-    "sandbox": {"quads": 150, "tex": 1024, "cage": 0.05, "ray": 0.25, "sharp": 60},
+    "swing": {"quads": 1200, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60, "chains": True},
+    "seesaw": {"quads": 900, "tex": 1024, "cage": 0.04, "ray": 0.2, "sharp": 60},
+    "sandbox": {"quads": 400, "tex": 1024, "cage": 0.06, "ray": 0.25, "sharp": 60, "bake_from_detailed": True},
 }
 
 
@@ -490,6 +504,7 @@ def rebuild_chains(low, high):
     bands = np.split(ordered, splits + 1)
     print("chains found", len(bands), [round(float(b.mean()), 2) for b in bands])
 
+    lines = []
     bm = bmesh.new()
     bm.from_mesh(low.data)
     for band in bands:
@@ -513,24 +528,145 @@ def rebuild_chains(low, high):
         rate = (upper - lower) / 1.6
         at_bottom = lower + rate * (bottom - 0.05 - 1.05)
         at_top = lower + rate * (top + 0.05 - 1.05)
-        radius = max(0.03, (hi_x - lo_x) / 2 * 0.7)
-        ring = []
-        for z, centre in ((bottom - 0.05, at_bottom), (top + 0.05, at_top)):
-            ring.append(
-                [
-                    bm.verts.new(
-                        (centre.x + radius * math.cos(math.tau * i / 6), centre.y + radius * math.sin(math.tau * i / 6), z)
-                    )
-                    for i in range(6)
-                ]
-            )
-        for i in range(6):
-            j = (i + 1) % 6
-            bm.faces.new((ring[0][i], ring[0][j], ring[1][j], ring[1][i]))
+        lines.append((at_bottom, at_top))
     bm.normal_update()
     bm.to_mesh(low.data)
     bm.free()
     low.data.update()
+    return lines, bottom - 0.05, top + 0.05
+
+
+def add_chain_links(low, lines, bottom, top):
+    """Add interlocking links, each turned 90 degrees from the last, with their own plain metal material."""
+    material = bpy.data.materials.new(f"{low.name}_chain")
+    material.use_nodes = True
+    bsdf = next(n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    bsdf.inputs["Base Color"].default_value = (0.32, 0.34, 0.37, 1)
+    bsdf.inputs["Roughness"].default_value = 0.55
+    low.data.materials.append(material)
+    slot = len(low.data.materials) - 1
+
+    bm = bmesh.new()
+    bm.from_mesh(low.data)
+    count = 0
+    for at_bottom, at_top in lines:
+        links = max(2, round((top - bottom) / LINK_PITCH))
+        for index in range(links):
+            t = (index + 0.5) / links
+            centre = at_bottom.lerp(at_top, t)
+            z = bottom + (top - bottom) * t
+            across = mathutils.Vector((1, 0)) if index % 2 else mathutils.Vector((0, 1))
+            rings = []
+            for i in range(LINK_SEGMENTS):
+                angle = math.tau * i / LINK_SEGMENTS
+                outward = mathutils.Vector((across.x * math.cos(angle), across.y * math.cos(angle), math.sin(angle)))
+                base = mathutils.Vector(
+                    (
+                        centre.x + across.x * LINK_HALF_WIDTH * math.cos(angle),
+                        centre.y + across.y * LINK_HALF_WIDTH * math.cos(angle),
+                        z + LINK_HALF_LENGTH * math.sin(angle),
+                    )
+                )
+                side = mathutils.Vector((-across.y, across.x, 0))
+                rings.append(
+                    [
+                        bm.verts.new(
+                            base
+                            + outward * LINK_TUBE * math.cos(math.tau * j / 3)
+                            + side * LINK_TUBE * math.sin(math.tau * j / 3)
+                        )
+                        for j in range(3)
+                    ]
+                )
+            for i in range(LINK_SEGMENTS):
+                next_ring = rings[(i + 1) % LINK_SEGMENTS]
+                for j in range(3):
+                    k = (j + 1) % 3
+                    face = bm.faces.new((rings[i][j], rings[i][k], next_ring[k], next_ring[j]))
+                    face.material_index = slot
+                    face.smooth = True
+            count += 1
+    bm.normal_update()
+    bm.to_mesh(low.data)
+    bm.free()
+    low.data.update()
+    print("chain links", count)
+
+
+def build_fence_low(high):
+    """Model the section from measurements of the detailed fence: thin, regular shapes that remeshing mangles."""
+    coords = np.empty(len(high.data.vertices) * 3, dtype=np.float64)
+    high.data.vertices.foreach_get("co", coords)
+    coords = coords.reshape(-1, 3)
+
+    middle = coords[np.abs(coords[:, 0]) < 0.4]
+    ordered = np.argsort(middle[:, 2])
+    rails = np.split(middle[ordered], np.flatnonzero(np.diff(middle[ordered, 2]) > 0.15) + 1)
+    rails = [r for r in rails if len(r) > 20]
+
+    # Measure posts between and beyond the rails, where no bracket or rail widens them.
+    clear = np.ones(len(coords), dtype=bool)
+    for rail in rails:
+        clear &= (coords[:, 2] < rail[:, 2].min() - 0.1) | (coords[:, 2] > rail[:, 2].max() + 0.1)
+    posts = []
+    for sign in (-1, 1):
+        part = coords[clear & (coords[:, 0] * sign > 1.2)]
+        posts.append(
+            {
+                "x": (part[:, 0].min() + part[:, 0].max()) / 2,
+                "y": (part[:, 1].min() + part[:, 1].max()) / 2,
+                "rx": (part[:, 0].max() - part[:, 0].min()) / 2,
+                "ry": (part[:, 1].max() - part[:, 1].min()) / 2,
+                "top": part[:, 2].max(),
+            }
+        )
+    print("fence posts", [{k: round(float(v), 3) for k, v in p.items()} for p in posts], "rails", len(rails))
+
+    verts, faces = [], []
+
+    def ring(centre_x, centre_y, z, rx, ry, sides):
+        start = len(verts)
+        for i in range(sides):
+            angle = math.tau * i / sides
+            verts.append((centre_x + rx * math.cos(angle), centre_y + ry * math.sin(angle), z))
+        return start
+
+    for post in posts:
+        lower = ring(post["x"], post["y"], 0.0, post["rx"], post["ry"], FENCE_POST_SIDES)
+        upper = ring(post["x"], post["y"], post["top"] - 0.05, post["rx"], post["ry"], FENCE_POST_SIDES)
+        cap = ring(post["x"], post["y"], post["top"], post["rx"] * 0.72, post["ry"] * 0.72, FENCE_POST_SIDES)
+        for i in range(FENCE_POST_SIDES):
+            j = (i + 1) % FENCE_POST_SIDES
+            faces.append((lower + i, lower + j, upper + j, upper + i))
+            faces.append((upper + i, upper + j, cap + j, cap + i))
+        faces.append(tuple(cap + i for i in range(FENCE_POST_SIDES)))
+
+    left, right = sorted(posts, key=lambda p: p["x"])
+    start_x = left["x"] + left["rx"] * 0.7
+    end_x = right["x"] - right["rx"] * 0.7
+    for rail in rails:
+        y, z = (rail[:, 1].min() + rail[:, 1].max()) / 2, (rail[:, 2].min() + rail[:, 2].max()) / 2
+        half_y, half_z = (rail[:, 1].max() - rail[:, 1].min()) / 2, (rail[:, 2].max() - rail[:, 2].min()) / 2
+        start = len(verts)
+        for x in (start_x, end_x):
+            for i in range(FENCE_RAIL_SIDES):
+                angle = math.tau * i / FENCE_RAIL_SIDES
+                verts.append((x, y + half_y * math.cos(angle), z + half_z * math.sin(angle)))
+        for i in range(FENCE_RAIL_SIDES):
+            j = (i + 1) % FENCE_RAIL_SIDES
+            faces.append((start + i, start + j, start + FENCE_RAIL_SIDES + j, start + FENCE_RAIL_SIDES + i))
+
+    mesh = bpy.data.meshes.new("Retopo_fence_Voxel")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(mesh)
+    bm.free()
+    low = bpy.data.objects.new("Retopo_fence_Voxel", mesh)
+    bpy.context.scene.collection.objects.link(low)
+    bpy.context.view_layer.update()
 
 
 def mark_sharp(ob, degrees):
@@ -672,7 +808,7 @@ def finish_kid():
         node_tree.nodes.clear()
         output = node_tree.nodes.new("ShaderNodeOutputMaterial")
         bsdf = node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-        bsdf.inputs["Roughness"].default_value = 0.7
+        bsdf.inputs["Roughness"].default_value = 0.95
         tex_a = node_tree.nodes.new("ShaderNodeTexImage")
         tex_a.image = albedo
         tex_n = node_tree.nodes.new("ShaderNodeTexImage")
@@ -699,11 +835,13 @@ def finish_kid():
 
 
 def merge_kid():
-    """Append the low-poly kid and its five materials into the open main file."""
+    """Append the rigged kid, its clips and its five materials into the open main file."""
     if bpy.data.objects.get("P_kid"):
         return
-    with bpy.data.libraries.load(f"{BLENDS}/kid.blend", link=False) as (source, target):
-        target.objects = ["P_kid"]
+    with bpy.data.libraries.load(f"{BLENDS}/kid_rigged.blend", link=False) as (source, target):
+        target.objects = ["P_kid", "KidRig"]
         target.materials = [f"KidLow_{n}" for n in KID_VARIANTS]
-    assets_collection().objects.link(target.objects[0])
-    print("merged kid")
+        target.actions = ["idle", "walk", "run", "frozen"]
+    for ob in target.objects:
+        assets_collection().objects.link(ob)
+    print("merged rigged kid")

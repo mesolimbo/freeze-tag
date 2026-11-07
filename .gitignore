@@ -2,3 +2,7 @@ backups/
 *.blend1
 *.blend2
 __pycache__/
+.playwright-mcp/
+node_modules/
+game/dist/
+game/release/

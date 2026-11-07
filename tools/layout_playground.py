@@ -16,6 +16,7 @@ GROUND_SIZE = 48
 TILE_METRES = 6
 PLAY_RADIUS = 10.56
 RIM_INNER_RADIUS = 9.6
+GROUND_SINK = 0.02
 
 # Prop, (x, y, z), z rotation in radians, scale.
 EQUIPMENT = [
@@ -50,6 +51,10 @@ def place(col, prop, location, rotation, scale=1.0, label=None):
     ob = bpy.data.objects.new(label or prop, source.data)
     col.objects.link(ob)
     ob.location = location
+    if location[2] == 0:
+        # Remeshing moves the lowest point, so sit each prop just into the ground instead of trusting z=0.
+        lowest = min(v.co.z for v in source.data.vertices)
+        ob.location.z = -lowest * scale - GROUND_SINK
     ob.rotation_euler = (0, 0, rotation)
     ob.scale = (scale, scale, scale)
     return ob
@@ -241,12 +246,21 @@ def add_low_kids():
         scene.collection.children.link(kids)
     spawns = {"leo": (6, -8), "maya": (-7, -10), "sam": (8, 8), "zoe": (-8, 7), "toby": (0, -14)}
     mesh = bpy.data.objects["P_kid"].data
+    rig_data = bpy.data.objects["KidRig"].data
+    idle = bpy.data.actions["idle"]
     for name, (x, game_z) in spawns.items():
+        rig = bpy.data.objects.new(f"Rig_{name}", rig_data)
+        kids.objects.link(rig)
+        rig.location = (x, -game_z, 0)
+        rig.animation_data_create()
+        rig.animation_data.action = idle
+        rig.animation_data.action_slot = idle.slots[0]
         ob = bpy.data.objects.new(f"Kid_{name}", mesh)
         kids.objects.link(ob)
+        ob.parent = rig
         ob.material_slots[0].link = "OBJECT"
         ob.material_slots[0].material = bpy.data.materials[f"KidLow_{name}"]
-        ob.location = (x, -game_z, 0)
+        ob.modifiers.new("Armature", "ARMATURE").object = rig
 
 
 def add_fence(col):
@@ -383,6 +397,7 @@ def main():
     for ob in bpy.data.collections["Kids"].objects:
         ob.hide_render = False
         ob.hide_set(False)
+    bpy.context.scene.frame_set(0)
     # The game wants saturated cartoon colors, which AgX mutes.
     bpy.context.scene.view_settings.view_transform = "Standard"
     bpy.context.scene.view_settings.look = "None"

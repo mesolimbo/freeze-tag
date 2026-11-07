@@ -1,0 +1,156 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Kid animation preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #87ceeb; overflow: hidden; font: 14px system-ui; }
+  #controls { position: fixed; top: 12px; left: 12px; display: flex; gap: 8px; }
+  button { padding: 8px 14px; font: inherit; }
+</style>
+<div id="controls">
+  <button data-state="idle">idle</button>
+  <button data-state="walk">walk</button>
+  <button data-state="run">run</button>
+  <button data-state="frozen">frozen</button>
+</div>
+<script type="importmap">
+  {"imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }}
+</script>
+<script type="module">
+  import * as THREE from 'three';
+  import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+  import {clone} from 'three/addons/utils/SkeletonUtils.js';
+
+  // Serve the project root over HTTP and open /tools/kid_preview.html.
+  const KIDS = ['leo', 'maya', 'sam', 'zoe', 'toby'];
+  const BASE_SPEED = 7.2;
+  const SPEED_MULTIPLIER = {leo: 1.1, maya: 0.95, sam: 1.05, zoe: 1.0, toby: 1.0};
+  // Same movement speeds as KidRunner in Game.tsx.
+  const MOVE_SPEED = {idle: 0, walk: BASE_SPEED * 0.6, run: BASE_SPEED * 1.15, frozen: 0};
+  // Clip playback that keeps feet near the ground speed without looking frantic.
+  const CLIP_RATE = {idle: 1, walk: 1.5, run: 1.3, frozen: 1};
+  const CROSSFADE_SECONDS = 0.2;
+  // A tag should read instantly, and ice is shinier than cloth.
+  const FREEZE_SECONDS = 0.08;
+  const FROZEN_ROUGHNESS = 0.6;
+
+  const renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.shadowMap.enabled = true;
+  document.body.append(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#87ceeb');
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+  camera.position.set(0, 7, 15);
+  camera.lookAt(0, 0.8, 0);
+  scene.add(new THREE.HemisphereLight('#bcdcff', '#4d7c39', 1.8));
+  const sun = new THREE.DirectionalLight('#fffbe8', 3);
+  sun.position.set(8, 14, 6);
+  sun.castShadow = true;
+  sun.shadow.camera.left = sun.shadow.camera.bottom = -12;
+  sun.shadow.camera.right = sun.shadow.camera.top = 12;
+  scene.add(sun);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshStandardMaterial({color: '#4d803a'}));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const gltf = await new GLTFLoader().loadAsync('../assets/game/kid.glb');
+  const textureLoader = new THREE.TextureLoader();
+  const clips = Object.fromEntries(gltf.animations.map((clip) => [clip.name, clip]));
+
+  const runners = await Promise.all(KIDS.map(async (name, index) => {
+    const model = clone(gltf.scene);
+    const loadMap = async (file) => {
+      const texture = await textureLoader.loadAsync(file);
+      // glTF UVs start at the top left, unlike the three.js texture default.
+      texture.flipY = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    };
+    const map = await loadMap(`../assets/game/kid_${name}.webp`);
+    const frozenMap = await loadMap(`../assets/game/kid_${name}_frozen.webp`);
+    let material;
+    model.traverse((node) => {
+      if (node.isSkinnedMesh) {
+        node.material = node.material.clone();
+        node.material.map = map;
+        material = node.material;
+        node.castShadow = true;
+        // Skinned bounds follow the rest pose, so a moving kid could be culled mid-stride.
+        node.frustumCulled = false;
+      }
+    });
+    scene.add(model);
+    const mixer = new THREE.AnimationMixer(model);
+    // A random start and a slight rate difference stop the kids moving in unison.
+    const actions = Object.fromEntries(Object.entries(clips).map(([key, clip]) => {
+      const action = mixer.clipAction(clip);
+      action.time = Math.random() * clip.duration;
+      action.setEffectiveTimeScale(CLIP_RATE[key] * (0.94 + Math.random() * 0.12));
+      return [key, action];
+    }));
+    return {name, model, mixer, actions, map, frozenMap, material, baseRoughness: material.roughness, current: null, angle: (index / KIDS.length) * Math.PI * 2, radius: 3 + index * 1.2};
+  }));
+
+  function setState(state) {
+    for (const runner of runners) {
+      const next = runner.actions[state];
+      if (runner.current === next) continue;
+      next.reset().setEffectiveWeight(1).play();
+      next.time = Math.random() * next.getClip().duration;
+      const frozen = state === 'frozen';
+      if (frozen) next.setLoop(THREE.LoopOnce).clampWhenFinished = true;
+      if (runner.current) next.crossFadeFrom(runner.current, frozen ? FREEZE_SECONDS : CROSSFADE_SECONDS, true);
+      runner.material.map = frozen ? runner.frozenMap : runner.map;
+      runner.material.roughness = frozen ? FROZEN_ROUGHNESS : runner.baseRoughness;
+      runner.current = next;
+    }
+    window.kidState = state;
+  }
+
+  document.querySelectorAll('button').forEach((button) => {
+    button.onclick = () => setState(button.dataset.state);
+  });
+
+  const clock = new THREE.Clock();
+  function frame() {
+    const delta = Math.min(clock.getDelta(), 0.05);
+    for (const runner of runners) {
+      const speed = MOVE_SPEED[window.kidState] * SPEED_MULTIPLIER[runner.name];
+      runner.angle += (speed / runner.radius) * delta * 0.35;
+      const x = Math.sin(runner.angle) * runner.radius;
+      const z = Math.cos(runner.angle) * runner.radius;
+      runner.model.position.set(x, 0, z);
+      // The model faces -Z, so heading gets a half turn, as HumanoidCharacter documents.
+      const tangent = runner.angle + Math.PI / 2;
+      runner.model.rotation.y = tangent + Math.PI;
+      runner.mixer.update(delta);
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  setState(new URLSearchParams(location.search).get('state') || 'run');
+  frame();
+
+  window.kidReport = {
+    clips: gltf.animations.map((clip) => ({name: clip.name, seconds: +clip.duration.toFixed(3), tracks: clip.tracks.length})),
+    bones: runners[0].model.getObjectByProperty('isSkinnedMesh', true).skeleton.bones.length,
+    triangles: runners[0].model.getObjectByProperty('isSkinnedMesh', true).geometry.index.count / 3,
+    renderCalls: () => renderer.info.render.calls,
+    renderTriangles: () => renderer.info.render.triangles,
+    time: (name) => runners.find((runner) => runner.name === name).current.time,
+    footHeight: (name) => {
+      const runner = runners.find((item) => item.name === name);
+      const toe = runner.model.getObjectByName('toe_R').getWorldPosition(new THREE.Vector3());
+      return +toe.y.toFixed(3);
+    },
+  };
+  window.kidDebug = {runners, camera, setState};
+  window.kidReady = true;
+</script>
