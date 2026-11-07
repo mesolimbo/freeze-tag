@@ -398,6 +398,41 @@ function IceBlock({isFrozen}: {isFrozen: boolean}) {
   );
 }
 
+/** How far ahead a kid checks for the fence when choosing a heading. */
+const FENCE_LOOKAHEAD = 5;
+/** Keeps kids this far inside the clamp so they turn before they scrape along the fence. */
+const FENCE_CLEARANCE = 1;
+const FENCE_PENALTY = 0.6;
+const HEADING_SAMPLES = 16;
+/** How quickly a kid's velocity follows its chosen heading (per second). */
+const STEER_RATE = 10;
+
+/**
+ * The heading closest to (wantX, wantZ) that does not run into the fence within the lookahead.
+ * In a corner every heading away from the player hits a fence, so this picks a run along one fence instead.
+ */
+function pickHeading(x: number, z: number, wantX: number, wantZ: number, limit: number) {
+  const soft = limit - FENCE_CLEARANCE;
+  const overrun = (dx: number, dz: number) =>
+    Math.max(0, Math.abs(x + dx * FENCE_LOOKAHEAD) - soft) + Math.max(0, Math.abs(z + dz * FENCE_LOOKAHEAD) - soft);
+
+  if (overrun(wantX, wantZ) === 0) return Math.atan2(wantX, wantZ);
+
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < HEADING_SAMPLES; i++) {
+    const angle = (i / HEADING_SAMPLES) * Math.PI * 2;
+    const dx = Math.sin(angle);
+    const dz = Math.cos(angle);
+    const score = dx * wantX + dz * wantZ - overrun(dx, dz) * FENCE_PENALTY;
+    if (score > bestScore) {
+      bestScore = score;
+      best = angle;
+    }
+  }
+  return best;
+}
+
 /** Individual Kid Runner with flee AI */
 function KidRunner({
   data,
@@ -458,34 +493,34 @@ function KidRunner({
       wanderAngle.current += (Math.random() - 0.5) * 1.5;
     }
 
+    const limit = HALF_PARK - 2.5;
+
     if (distToPlayer < 9.5) {
       _tempToPlayer.normalize();
+      const heading = pickHeading(pos.current.x, pos.current.z, _tempToPlayer.x, _tempToPlayer.z, limit);
       const zigzag = Math.sin(Date.now() * 0.006 + data.id) * 0.4;
-      _tempKidDir.set(
-        _tempToPlayer.x * Math.cos(zigzag) - _tempToPlayer.z * Math.sin(zigzag),
-        0,
-        _tempToPlayer.x * Math.sin(zigzag) + _tempToPlayer.z * Math.cos(zigzag)
-      );
-      vel.current.copy(_tempKidDir).multiplyScalar(baseSpeed * 1.15);
+      _tempKidDir.set(Math.sin(heading + zigzag), 0, Math.cos(heading + zigzag)).multiplyScalar(baseSpeed * 1.15);
       if (animState !== 'run') setAnimState('run');
     } else {
-      const dirX = Math.sin(wanderAngle.current);
-      const dirZ = Math.cos(wanderAngle.current);
-      vel.current.set(dirX, 0, dirZ).multiplyScalar(baseSpeed * 0.6);
+      wanderAngle.current = pickHeading(
+        pos.current.x,
+        pos.current.z,
+        Math.sin(wanderAngle.current),
+        Math.cos(wanderAngle.current),
+        limit,
+      );
+      _tempKidDir
+        .set(Math.sin(wanderAngle.current), 0, Math.cos(wanderAngle.current))
+        .multiplyScalar(baseSpeed * 0.6);
       if (animState !== 'walk') setAnimState('walk');
     }
 
-    const limit = HALF_PARK - 2.5;
-    if (pos.current.x > limit) vel.current.x -= 8;
-    if (pos.current.x < -limit) vel.current.x += 8;
-    if (pos.current.z > limit) vel.current.z -= 8;
-    if (pos.current.z < -limit) vel.current.z += 8;
-
     const distCenter = Math.hypot(pos.current.x, pos.current.z);
     if (distCenter < 3.8) {
-      vel.current.x += (pos.current.x / (distCenter + 0.1)) * 6;
-      vel.current.z += (pos.current.z / (distCenter + 0.1)) * 6;
+      _tempKidDir.x += (pos.current.x / (distCenter + 0.1)) * 6;
+      _tempKidDir.z += (pos.current.z / (distCenter + 0.1)) * 6;
     }
+    vel.current.lerp(_tempKidDir, 1 - Math.exp(-STEER_RATE * dt));
 
     pos.current.x += vel.current.x * dt;
     pos.current.z += vel.current.z * dt;
