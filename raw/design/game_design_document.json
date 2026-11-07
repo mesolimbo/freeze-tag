@@ -1,0 +1,47 @@
+{
+  "title": "Park Freeze Tag",
+  "hook": "Freeze runners with shift steering",
+  "game_overview": "Auto-sprint through a fenced park using only Left and Right Shift keys to steer your freeze aura into five kids in 20 seconds.",
+  "artstyle": "3d-cartoon",
+  "genre": "arcade",
+  "winning_condition": "Freeze all 5 fleeing kids with your frost tag within the 20-second time limit.",
+  "losing_condition": "The 20-second timer hits zero with one or more kids still running free.",
+  "player_mode": "single_player",
+  "supported_orientations": [
+    "landscape",
+    "tall",
+    "any"
+  ],
+  "input_methods": [
+    "touch",
+    "mouse",
+    "keyboard"
+  ],
+  "score_options": {
+    "score_type": "points",
+    "score_order": "higher_is_better"
+  },
+  "low_end_device_support": false,
+  "mobile_playable": true,
+  "language": [
+    "en"
+  ],
+  "content_descriptors": [],
+  "controls": [
+    {
+      "input": "Left Shift Key",
+      "action": "Steer tagger left while auto-sprinting forward."
+    },
+    {
+      "input": "Right Shift Key",
+      "action": "Steer tagger right while auto-sprinting forward."
+    }
+  ],
+  "sections": [
+    {
+      "title": "Controls & Locomotion",
+      "content": "The tagger continuously moves forward automatically. Locomotion is strictly controlled by Left Shift (steer left) and Right Shift (steer right). Tagging occurs passively via a 4.2-meter glowing Freeze Aura radius encircling the tagger.",
+      "summary": "Keyboard-only two-button shift steering mechanics."
+    }
+  ]
+}

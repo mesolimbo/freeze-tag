@@ -1,0 +1,56 @@
+{
+  "schema": [
+    {
+      "name": "timeLimit",
+      "type": "number",
+      "label": "Time Limit (Seconds)",
+      "default": 20,
+      "min": 10,
+      "max": 40,
+      "step": 1
+    },
+    {
+      "name": "playerSpeed",
+      "type": "number",
+      "label": "Player Auto-Run Speed",
+      "default": 9,
+      "min": 5,
+      "max": 15,
+      "step": 0.5
+    },
+    {
+      "name": "playerTurnRate",
+      "type": "number",
+      "label": "Player Turn Rate",
+      "default": 3.2,
+      "min": 1.5,
+      "max": 6,
+      "step": 0.2
+    },
+    {
+      "name": "freezeRadius",
+      "type": "number",
+      "label": "Freeze Aura Radius",
+      "default": 4.2,
+      "min": 2,
+      "max": 8,
+      "step": 0.2
+    },
+    {
+      "name": "kidFleeSpeed",
+      "type": "number",
+      "label": "Kids Flee Speed",
+      "default": 7.2,
+      "min": 4,
+      "max": 11,
+      "step": 0.2
+    }
+  ],
+  "values": {
+    "timeLimit": 20,
+    "playerSpeed": 9,
+    "playerTurnRate": 3.2,
+    "freezeRadius": 4.2,
+    "kidFleeSpeed": 7.2
+  }
+}
