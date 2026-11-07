@@ -1,5 +1,6 @@
-import {ArrowLeft, ArrowRight} from 'lucide-react';
+import {ArrowLeft, ArrowRight, Volume2, VolumeX} from 'lucide-react';
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {getConfig} from './constants';
 import {Game, KIDS_CONFIG} from './Game';
 import BackgroundMusic from './utils/BackgroundMusic';
@@ -14,6 +15,57 @@ const TICK_MS = 100;
 const URGENT_SECONDS = 5;
 /** Matches the opacity transition on #splash in index.html. */
 const SPLASH_FADE_MS = 700;
+/** A shade deeper than the sky's zenith (#4f9de0), so the icon matches the sky but still stands out against it. */
+const MUTE_ICON_COLOR = '#3b87cf';
+
+function MuteButton({muted, blocked, onToggle}: {muted: boolean; blocked: boolean; onToggle: () => void}) {
+  const Icon = muted || blocked ? VolumeX : Volume2;
+  const label = blocked ? 'Click to turn on music' : muted ? 'Unmute music' : 'Mute music';
+  // While the browser blocks audio, the press itself unlocks it (BackgroundMusic listens for pointerdown), which
+  // clears `blocked` before the click lands. Remember the state at press time so that click does not also mute.
+  const unlockingPress = useRef(false);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={muted}
+      title={label}
+      onPointerDown={() => {
+        unlockingPress.current = blocked;
+      }}
+      // Blur straight away so Space or Enter on the result screen restarts the round instead of toggling music.
+      onClick={(e) => {
+        if (!blocked && !unlockingPress.current) onToggle();
+        unlockingPress.current = false;
+        e.currentTarget.blur();
+      }}
+      className={`fixed right-4 z-[61] flex h-10 items-center justify-center gap-2 rounded-full bg-white/75 shadow-md shadow-sky-900/20 backdrop-blur-sm transition hover:bg-white/95 sm:right-8 ${
+        blocked ? 'pl-4 pr-3' : 'w-10'
+      }`}
+      style={{top: 'calc(4.25rem + env(safe-area-inset-top, 0px))', color: MUTE_ICON_COLOR}}>
+      {/* Chrome ignores Shift when deciding whether a page may play sound, so a Shift-only player needs this hint. */}
+      {blocked && <span className="text-sm font-bold">Click for music</span>}
+      <Icon size={22} strokeWidth={2.5} />
+    </button>
+  );
+}
+
+/** Sits over the splash art: a loading note, then the start prompt. Clicking anywhere on it also starts. */
+function SplashPrompt({ready, onStart}: {ready: boolean; onStart: () => void}) {
+  return (
+    <div
+      className={`fixed inset-0 z-[60] flex items-end justify-center px-4 pb-[8vh] font-fun text-white ${
+        ready ? 'cursor-pointer' : ''
+      }`}
+      onClick={ready ? onStart : undefined}>
+      <div
+        className={`text-center text-3xl tracking-wide sm:text-5xl ${ready ? 'animate-blink-slow' : 'opacity-80'}`}
+        style={outline('#1e3a8a', '0.18em')}>
+        {ready ? 'Press Space to start' : 'Loading…'}
+      </div>
+    </div>
+  );
+}
 
 type Status = 'READY' | 'PLAYING' | 'CAUGHT_ALL' | 'TIME_UP';
 type Side = 'left' | 'right';
@@ -98,18 +150,15 @@ export default function App() {
   const [frozenKids, setFrozenKids] = useState<boolean[]>(() => KIDS_CONFIG.map(() => false));
   const [pressed, setPressed] = useState<Record<Side, boolean>>({left: false, right: false});
   const [ready, setReady] = useState(false);
+  const [started, setStarted] = useState(false);
+  // Once the first round starts the music keeps going through results and restarts.
+  const [musicStarted, setMusicStarted] = useState(false);
+  const [musicMuted, setMusicMuted] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const endedAt = useRef(0);
-  const handleReady = useCallback(() => setReady(true), []);
 
-  // The splash lives in index.html so it shows while the bundle downloads; fade it out once the scene is ready.
-  useEffect(() => {
-    if (!ready) return;
-    const splash = document.getElementById('splash');
-    if (!splash) return;
-    splash.classList.add('done');
-    const timer = setTimeout(() => splash.remove(), SPLASH_FADE_MS);
-    return () => clearTimeout(timer);
-  }, [ready]);
+  const toggleMusic = useCallback(() => setMusicMuted((muted) => !muted), []);
+  const handleReady = useCallback(() => setReady(true), []);
 
   const playerPosRef = useRef(randomCornerSpawn());
   const kidsPosRef = useRef(startingKids());
@@ -120,6 +169,7 @@ export default function App() {
     setFrozenKids(KIDS_CONFIG.map(() => false));
     setTimeRemaining(timeLimit);
     setStatus('PLAYING');
+    setMusicStarted(true);
   }, [timeLimit]);
 
   const endRound = useCallback((result: Status) => {
@@ -127,7 +177,21 @@ export default function App() {
     setStatus(result);
   }, []);
 
-  // Shift starts a round and steers (in Game). On the result screen any key continues.
+  // The splash lives in index.html so it shows while the bundle downloads. Once the scene is ready, Space fades it
+  // out and the clock starts the moment it is gone. Space rather than Shift: Chrome ignores modifier keys when
+  // deciding whether a page may play sound, so only a key like Space lets the music start with the round.
+  const leaveSplash = useCallback(() => {
+    setStarted(true);
+    setMusicStarted(true);
+    const splash = document.getElementById('splash');
+    splash?.classList.add('done');
+    window.setTimeout(() => {
+      splash?.remove();
+      startRound();
+    }, SPLASH_FADE_MS);
+  }, [startRound]);
+
+  // Space leaves the splash. Shift steers (in Game). On the result screen any key starts the next round.
   useEffect(() => {
     const sideOf = (e: KeyboardEvent): Side | null =>
       e.code === 'ShiftLeft' ? 'left' : e.code === 'ShiftRight' ? 'right' : null;
@@ -135,22 +199,30 @@ export default function App() {
       const side = sideOf(e);
       if (side) setPressed((p) => (p[side] ? p : {...p, [side]: true}));
       if (e.repeat || !ready) return;
-      if (status === 'READY' && side) startRound();
+      if (!started) {
+        if (e.code === 'Space') leaveSplash();
+        return;
+      }
       if ((status === 'CAUGHT_ALL' || status === 'TIME_UP') && performance.now() - endedAt.current > RESTART_DELAY_MS) {
         startRound();
       }
     };
     const onUp = (e: KeyboardEvent) => {
       const side = sideOf(e);
-      if (side) setPressed((p) => ({...p, [side]: false}));
+      if (!side) return;
+      // Same Windows quirk as the steering: with no Shift down any more, clear both keycaps.
+      setPressed((p) => (e.getModifierState('Shift') ? {...p, [side]: false} : {left: false, right: false}));
     };
+    const onBlur = () => setPressed({left: false, right: false});
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', onBlur);
     };
-  }, [status, startRound, ready]);
+  }, [status, startRound, ready, started, leaveSplash]);
 
   useEffect(() => {
     if (status === 'CAUGHT_ALL') gameAudio.playVictoryFanfare();
@@ -187,7 +259,21 @@ export default function App() {
 
   return (
     <div className="fixed inset-0 select-none overflow-hidden bg-zinc-950 font-sans text-white touch-none">
-      <BackgroundMusic url={getConfig('backgroundMusicUrl')} isPlaying={status === 'PLAYING'} isMuted={false} />
+      <BackgroundMusic
+        url={getConfig('backgroundMusicUrl')}
+        isPlaying={musicStarted}
+        isMuted={musicMuted}
+        volume={getConfig('defaultMusicVolume')}
+        onBlockedChange={setAudioBlocked}
+      />
+      {/* The splash is outside the React tree at z-50, so the prompt and the mute button go in a layer above it. */}
+      {createPortal(
+        <>
+          {!started && <SplashPrompt ready={ready} onStart={leaveSplash} />}
+          <MuteButton muted={musicMuted} blocked={started && audioBlocked && !musicMuted} onToggle={toggleMusic} />
+        </>,
+        document.body,
+      )}
 
       <div className="absolute inset-0">
         <Game

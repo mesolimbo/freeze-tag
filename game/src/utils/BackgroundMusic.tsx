@@ -12,6 +12,8 @@ export interface BackgroundMusicProps {
   readonly isMuted?: boolean;
   /** Master volume level between 0.0 (silent) and 1.0 (full). Defaults to 0.15. */
   readonly volume?: number;
+  /** Reports whether the browser is holding audio back until the player clicks, taps or presses a key. */
+  readonly onBlockedChange?: (blocked: boolean) => void;
 }
 
 /**
@@ -236,7 +238,10 @@ export function BackgroundMusic({
   isPlaying,
   isMuted = false,
   volume = DEFAULT_VOLUME,
+  onBlockedChange,
 }: BackgroundMusicProps): React.ReactElement | null {
+  const onBlockedChangeRef = useRef(onBlockedChange);
+  onBlockedChangeRef.current = onBlockedChange;
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
@@ -296,6 +301,11 @@ export function BackgroundMusic({
 
       audioCtxRef.current = ctx;
       masterGainRef.current = masterGain;
+
+      // A hidden tab also suspends the context, but then nobody can see the indicator anyway.
+      const reportBlocked = () => onBlockedChangeRef.current?.(ctx.state === 'suspended');
+      ctx.addEventListener('statechange', reportBlocked);
+      reportBlocked();
 
       // Autoplay unlock for mobile/desktop browsers with iOS WebKit silence kickstart
       const unlock = () => {
