@@ -189,19 +189,165 @@ const KID_NAMES: KidName[] = ['leo', 'maya', 'sam', 'zoe', 'toby'];
 useLoader.preload(GLTFLoader, PARK_URL);
 preloadKids(KID_NAMES);
 
+/** Half the width of the grass beyond the fence. A multiple of the 6 m tile keeps the pattern continuous. */
+const FAR_GROUND_HALF = 804;
+const GRASS_TILE_METRES = 6;
+
+/** Grass running from the fence to the horizon, with UVs that continue the park ground's tiling. */
+function makeFarGround(material: THREE.Material) {
+  const s = FAR_GROUND_HALF;
+  const corners = [
+    [-s, -s],
+    [-s, s],
+    [s, s],
+    [s, -s],
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(corners.flatMap(([x, z]) => [x, 0, z]), 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(corners.flatMap(() => [0, 1, 0]), 3));
+  // Matches the export of the park ground: u = x / tile, v = 1 + z / tile.
+  geometry.setAttribute(
+    'uv',
+    new THREE.Float32BufferAttribute(corners.flatMap(([x, z]) => [x / GRASS_TILE_METRES, 1 + z / GRASS_TILE_METRES]), 2),
+  );
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  const mesh = new THREE.Mesh(geometry, material);
+  // Just under the park ground, which covers it inside the fence.
+  mesh.position.y = -0.02;
+  return mesh;
+}
+
 /** The whole playground, exported from Blender. Collision stays in resolveObstacleCollision. */
 function ParkScene() {
   const gltf = useLoader(GLTFLoader, PARK_URL);
-  useMemo(() => {
+  const farGround = useMemo(() => {
+    let grass: THREE.MeshStandardMaterial | null = null;
     gltf.scene.traverse((node) => {
       const mesh = node as THREE.Mesh;
       if (!mesh.isMesh) return;
       const isGround = mesh.name.startsWith('Ground') || mesh.name.startsWith('PlayArea');
       mesh.castShadow = !isGround;
       mesh.receiveShadow = true;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      if (material.name === 'Ground_Grass') grass = material;
     });
+    const found = grass as unknown as THREE.MeshStandardMaterial;
+    for (const map of [found.map, found.normalMap, found.roughnessMap]) {
+      // Grass seen at a glancing angle blurs to mush without this.
+      if (map) map.anisotropy = 8;
+    }
+    return makeFarGround(found);
   }, [gltf]);
-  return <primitive object={gltf.scene} />;
+  return (
+    <>
+      <primitive object={gltf.scene} />
+      <primitive object={farGround} />
+    </>
+  );
+}
+
+const SKY_HORIZON = '#cfe6f2';
+/** Beyond the far ground and inside the camera's far plane. Exactly at the far plane, triangles get clipped. */
+const SKY_RADIUS = 1200;
+const SKY_ZENITH = '#4f9de0';
+/** Fog starts past the far corner of the park, so it only softens the land beyond the fence. */
+const FOG_NEAR = 70;
+const FOG_FAR = 650;
+
+const SKY_VERTEX = `
+varying vec3 vDirection;
+void main() {
+  vDirection = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const SKY_FRAGMENT = `
+uniform float uTime;
+uniform vec3 uHorizon;
+uniform vec3 uZenith;
+varying vec3 vDirection;
+
+// No sin(): many GPUs, Direct3D among them, compute it loosely for large arguments,
+// so neighbouring cells get unrelated values and the clouds break into hard squares.
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+  vec2 f = fract(p);
+  // Wrapping the cell index keeps the hash inputs small. The repeat is far too large to notice.
+  vec2 i = mod(floor(p), 289.0);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  vec2 right = mod(i + vec2(1.0, 0.0), 289.0);
+  vec2 up = mod(i + vec2(0.0, 1.0), 289.0);
+  vec2 corner = mod(i + vec2(1.0, 1.0), 289.0);
+  return mix(mix(hash(i), hash(right), u.x), mix(hash(up), hash(corner), u.x), u.y);
+}
+
+// Each layer is turned against the last, so no grid direction survives into the cloud shapes.
+const mat2 TURN = mat2(1.6, 1.2, -1.2, 1.6);
+
+float fbm(vec2 p) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  for (int i = 0; i < 6; i++) {
+    value += amplitude * noise(p);
+    p = TURN * p + vec2(17.1, 9.2);
+    amplitude *= 0.5;
+  }
+  return value;
+}
+
+void main() {
+  vec3 direction = normalize(vDirection);
+  float up = max(direction.y, 0.0);
+  vec3 sky = mix(uHorizon, uZenith, pow(up, 0.55));
+  // Project onto a flat cloud layer overhead, so clouds shrink and crowd toward the horizon.
+  vec2 layer = direction.xz / (direction.y + 0.12) * 1.3 + vec2(uTime * 0.008, uTime * 0.003);
+  float density = fbm(layer);
+  float cover = smoothstep(0.48, 0.68, density);
+  // Sampling a little toward the sun shades the far side, so clouds read as puffy, not as flat stickers.
+  float toward = fbm(layer + vec2(0.18, 0.1));
+  float light = clamp(0.62 + (density - toward) * 3.0, 0.0, 1.0);
+  vec3 cloud = mix(vec3(0.74, 0.80, 0.88), vec3(1.0), light);
+  float nearHorizon = smoothstep(0.02, 0.22, direction.y);
+  vec3 color = mix(sky, cloud, cover * nearHorizon * 0.95);
+  gl_FragColor = vec4(direction.y < 0.0 ? uHorizon : color, 1.0);
+  #include <colorspace_fragment>
+}
+`;
+
+/** Gradient sky with procedural clouds drifting across it. */
+function SkyDome() {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: SKY_VERTEX,
+        fragmentShader: SKY_FRAGMENT,
+        uniforms: {
+          uTime: {value: 0},
+          uHorizon: {value: new THREE.Color(SKY_HORIZON)},
+          uZenith: {value: new THREE.Color(SKY_ZENITH)},
+        },
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+      }),
+    [],
+  );
+  const meshRef = useRef<THREE.Mesh>(null);
+  useFrame(({camera, clock}) => {
+    material.uniforms.uTime.value = clock.getElapsedTime();
+    meshRef.current?.position.copy(camera.position);
+  });
+  return (
+    <mesh ref={meshRef} material={material} renderOrder={-1} frustumCulled={false}>
+      <sphereGeometry args={[SKY_RADIUS, 32, 16]} />
+    </mesh>
+  );
 }
 
 const ICE_BLOCKS_URL = `${import.meta.env.BASE_URL}assets/ice_blocks.glb`;
@@ -643,14 +789,16 @@ export function Game({
         camera={{
           fov: getConfig('fov'),
           near: 0.1,
-          far: 200,
+          far: 2000,
           position: [0, 1.6, 12],
         }}
         scene={{
-          background: new THREE.Color(getConfig('backgroundColor')),
+          background: new THREE.Color(SKY_HORIZON),
         }}
       >
+        <fog attach="fog" args={[SKY_HORIZON, FOG_NEAR, FOG_FAR]} />
         <Suspense fallback={null}>
+          <SkyDome />
           <ambientLight
             color={getConfig('ambientColor')}
             intensity={getConfig('ambientIntensity')}

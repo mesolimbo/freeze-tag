@@ -23,6 +23,17 @@ LINK_SEGMENTS = 8
 LINK_HALF_WIDTH = 0.042
 LINK_HALF_LENGTH = 0.072
 LINK_TUBE = 0.014
+# Measured on the detailed swing: the seat's top face and the underside of the top bar.
+SWING_SEAT_TOP = 0.615
+SWING_BAR_BOTTOM = 2.955
+CHAIN_CLEAR_RADIUS = 0.2
+# The seat's remeshed top bulges above the detailed one, so clearing starts a little higher.
+CHAIN_CLEAR_FROM = 0.66
+SHACKLE_HALF_WIDTH = 0.05
+SHACKLE_HALF_LENGTH = 0.07
+SHACKLE_TUBE = 0.019
+HANGER_HALF_WIDTH = 0.055
+HANGER_HALF_LENGTH = 0.09
 FENCE_POST_SIDES = 12
 FENCE_RAIL_SIDES = 6
 ADAPT_QUADS = True
@@ -487,7 +498,7 @@ LOW_PROFILE = {
     "bridge": {"quads": 150, "tex": 512, "cage": 0.04, "ray": 0.2, "sharp": 60},
     "slide": {"quads": 300, "tex": 1024, "cage": 0.04, "ray": 0.2, "sharp": 60},
     "stairs": {"quads": 300, "tex": 512, "cage": 0.06, "ray": 0.3, "sharp": 60},
-    "swing": {"quads": 1200, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60, "chains": True},
+    "swing": {"quads": 2200, "tex": 1024, "cage": 0.03, "ray": 0.15, "sharp": 60, "chains": True},
     "seesaw": {"quads": 900, "tex": 1024, "cage": 0.04, "ray": 0.2, "sharp": 60},
     "sandbox": {"quads": 400, "tex": 1024, "cage": 0.06, "ray": 0.25, "sharp": 60, "bake_from_detailed": True},
 }
@@ -527,13 +538,15 @@ def swap_in_detailed_source(name, high):
 
 
 def rebuild_chains(low, high):
-    """Swap remeshed chains, which collapse to ribbons at this budget, for prisms that the bake can texture."""
+    """Swap the remeshed chains and their hooks, which collapse at this budget, for modelled ones.
+
+    Returns each chain's path and the heights it hangs between, for add_chain_links.
+    """
     count = len(high.data.vertices)
     coords = np.empty(count * 3, dtype=np.float64)
     high.data.vertices.foreach_get("co", coords)
     coords = coords.reshape(-1, 3)
 
-    bottom, top = 0.85, 2.92
     middle = coords[(coords[:, 2] > 1.6) & (coords[:, 2] < 1.9) & (np.abs(coords[:, 0]) < 2.7)]
     ordered = np.sort(middle[:, 0])
     splits = np.flatnonzero(np.diff(ordered) > 0.15)
@@ -544,8 +557,7 @@ def rebuild_chains(low, high):
     bm = bmesh.new()
     bm.from_mesh(low.data)
     for band in bands:
-        lo_x, hi_x = band.min(), band.max()
-        centre_x = (lo_x + hi_x) / 2
+        centre_x = (band.min() + band.max()) / 2
 
         def centre_at(z_lo, z_hi):
             part = coords[
@@ -553,27 +565,66 @@ def rebuild_chains(low, high):
             ]
             return mathutils.Vector(((part[:, 0].min() + part[:, 0].max()) / 2, (part[:, 1].min() + part[:, 1].max()) / 2))
 
-        doomed = [
-            face
-            for face in bm.faces
-            if abs(face.calc_center_median().x - centre_x) < 0.2 and bottom < face.calc_center_median().z < top
-        ]
-        bmesh.ops.delete(bm, geom=doomed, context="FACES")
-
         lower, upper = centre_at(0.95, 1.15), centre_at(2.55, 2.75)
         rate = (upper - lower) / 1.6
-        at_bottom = lower + rate * (bottom - 0.05 - 1.05)
-        at_top = lower + rate * (top + 0.05 - 1.05)
-        lines.append((at_bottom, at_top))
+
+        def at(z):
+            return lower + rate * (z - 1.05)
+
+        # Everything between the seat and the bar goes, hooks included, so the new chain meets both cleanly.
+        doomed = []
+        for face in bm.faces:
+            middle_point = face.calc_center_median()
+            path = at(middle_point.z)
+            if (
+                CHAIN_CLEAR_FROM < middle_point.z < SWING_BAR_BOTTOM
+                and abs(middle_point.x - path.x) < CHAIN_CLEAR_RADIUS
+                and abs(middle_point.y - path.y) < CHAIN_CLEAR_RADIUS
+            ):
+                doomed.append(face)
+        bmesh.ops.delete(bm, geom=doomed, context="FACES")
+        lines.append((at(SWING_SEAT_TOP), at(SWING_BAR_BOTTOM)))
+    # Close any opening the clearing left in the seat or bar, so nothing shows through around a shackle.
+    boundary = [edge for edge in bm.edges if edge.is_boundary]
+    bmesh.ops.holes_fill(bm, edges=boundary, sides=40)
     bm.normal_update()
     bm.to_mesh(low.data)
     bm.free()
     low.data.update()
-    return lines, bottom - 0.05, top + 0.05
+    return lines, SWING_SEAT_TOP, SWING_BAR_BOTTOM
+
+
+def add_link(bm, centre, z, across, half_width, half_length, tube, slot):
+    """One oval link standing in the vertical plane through `across`."""
+    side = mathutils.Vector((-across.y, across.x, 0))
+    rings = []
+    for i in range(LINK_SEGMENTS):
+        angle = math.tau * i / LINK_SEGMENTS
+        outward = mathutils.Vector((across.x * math.cos(angle), across.y * math.cos(angle), math.sin(angle)))
+        base = mathutils.Vector(
+            (
+                centre.x + across.x * half_width * math.cos(angle),
+                centre.y + across.y * half_width * math.cos(angle),
+                z + half_length * math.sin(angle),
+            )
+        )
+        rings.append(
+            [
+                bm.verts.new(base + outward * tube * math.cos(math.tau * j / 3) + side * tube * math.sin(math.tau * j / 3))
+                for j in range(3)
+            ]
+        )
+    for i in range(LINK_SEGMENTS):
+        next_ring = rings[(i + 1) % LINK_SEGMENTS]
+        for j in range(3):
+            k = (j + 1) % 3
+            face = bm.faces.new((rings[i][j], rings[i][k], next_ring[k], next_ring[j]))
+            face.material_index = slot
+            face.smooth = True
 
 
 def add_chain_links(low, lines, bottom, top):
-    """Add interlocking links, each turned 90 degrees from the last, with their own plain metal material."""
+    """Hang interlocking links between a shackle sunk into the seat and a hanger sunk into the bar."""
     material = bpy.data.materials.new(f"{low.name}_chain")
     material.use_nodes = True
     bsdf = next(n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
@@ -582,46 +633,32 @@ def add_chain_links(low, lines, bottom, top):
     low.data.materials.append(material)
     slot = len(low.data.materials) - 1
 
+    along_x = mathutils.Vector((1, 0))
+    along_y = mathutils.Vector((0, 1))
     bm = bmesh.new()
     bm.from_mesh(low.data)
     count = 0
     for at_bottom, at_top in lines:
-        links = max(2, round((top - bottom) / LINK_PITCH))
+        # The end pieces overlap the first and last links, so the chain runs between their inner ends.
+        chain_bottom = bottom + SHACKLE_HALF_LENGTH * 0.9
+        chain_top = top - HANGER_HALF_LENGTH * 0.9
+        links = max(2, round((chain_top - chain_bottom) / LINK_PITCH))
+        span = top - bottom
+
+        def path(z):
+            return at_bottom.lerp(at_top, (z - bottom) / span)
+
         for index in range(links):
-            t = (index + 0.5) / links
-            centre = at_bottom.lerp(at_top, t)
-            z = bottom + (top - bottom) * t
-            across = mathutils.Vector((1, 0)) if index % 2 else mathutils.Vector((0, 1))
-            rings = []
-            for i in range(LINK_SEGMENTS):
-                angle = math.tau * i / LINK_SEGMENTS
-                outward = mathutils.Vector((across.x * math.cos(angle), across.y * math.cos(angle), math.sin(angle)))
-                base = mathutils.Vector(
-                    (
-                        centre.x + across.x * LINK_HALF_WIDTH * math.cos(angle),
-                        centre.y + across.y * LINK_HALF_WIDTH * math.cos(angle),
-                        z + LINK_HALF_LENGTH * math.sin(angle),
-                    )
-                )
-                side = mathutils.Vector((-across.y, across.x, 0))
-                rings.append(
-                    [
-                        bm.verts.new(
-                            base
-                            + outward * LINK_TUBE * math.cos(math.tau * j / 3)
-                            + side * LINK_TUBE * math.sin(math.tau * j / 3)
-                        )
-                        for j in range(3)
-                    ]
-                )
-            for i in range(LINK_SEGMENTS):
-                next_ring = rings[(i + 1) % LINK_SEGMENTS]
-                for j in range(3):
-                    k = (j + 1) % 3
-                    face = bm.faces.new((rings[i][j], rings[i][k], next_ring[k], next_ring[j]))
-                    face.material_index = slot
-                    face.smooth = True
+            z = chain_bottom + (chain_top - chain_bottom) * (index + 0.5) / links
+            across = along_x if index % 2 else along_y
+            add_link(bm, path(z), z, across, LINK_HALF_WIDTH, LINK_HALF_LENGTH, LINK_TUBE, slot)
             count += 1
+        # Each end piece is turned across the link it holds, the way a real chain interlocks.
+        add_link(bm, path(bottom), bottom, along_x, SHACKLE_HALF_WIDTH, SHACKLE_HALF_LENGTH, SHACKLE_TUBE, slot)
+        last_across = along_x if (links - 1) % 2 else along_y
+        top_across = along_y if last_across is along_x else along_x
+        add_link(bm, path(top), top, top_across, HANGER_HALF_WIDTH, HANGER_HALF_LENGTH, SHACKLE_TUBE, slot)
+        count += 2
     bm.normal_update()
     bm.to_mesh(low.data)
     bm.free()

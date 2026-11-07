@@ -22,6 +22,21 @@ interface CustomWindow extends Window {
   canHandleBackKey?: boolean;
 }
 
+/** Distance of each spawn corner from the centre on both axes, inside the fence and clear of the corner trees. */
+const SPAWN_INSET = 19;
+const EYE_HEIGHT = 1.6;
+
+/** A random park corner, facing one of the two neighbouring corners. */
+function randomCornerSpawn() {
+  const x = (Math.random() < 0.5 ? -1 : 1) * SPAWN_INSET;
+  const z = (Math.random() < 0.5 ? -1 : 1) * SPAWN_INSET;
+  const alongX = Math.random() < 0.5;
+  const dx = alongX ? -2 * x : 0;
+  const dz = alongX ? 0 : -2 * z;
+  // Forward is (-sin yaw, -cos yaw), so this yaw points at the chosen corner.
+  return {x, y: EYE_HEIGHT, z, yaw: Math.atan2(-dx, -dz), pitch: 0};
+}
+
 export default function App() {
   const {sdk} = usePlayground();
 
@@ -54,13 +69,7 @@ export default function App() {
   const [freezeNotice, setFreezeNotice] = useState<string | null>(null);
 
   // Shared First Person Refs
-  const playerPosRef = useRef({
-    x: 0,
-    y: 1.6,
-    z: 16,
-    yaw: 0,
-    pitch: 0,
-  });
+  const playerPosRef = useRef(randomCornerSpawn());
 
   const kidsPosRef = useRef<
     Array<{x: number; y: number; z: number; isFrozen: boolean}>
@@ -105,13 +114,7 @@ export default function App() {
   // Reset & Start Game
   const initGame = useCallback(() => {
     const totalTime = getConfig('timeLimit');
-    playerPosRef.current = {
-      x: 0,
-      y: 1.6,
-      z: 16,
-      yaw: 0,
-      pitch: 0,
-    };
+    playerPosRef.current = randomCornerSpawn();
     kidsPosRef.current = KIDS_CONFIG.map((k) => ({
       x: k.initialPos[0],
       y: k.initialPos[1],
