@@ -1,5 +1,3 @@
-import {MusicTrack} from './utils/helper';
-
 /** Game configuration schema. */
 export const CONFIG = {
   // --- Game ---
@@ -48,7 +46,7 @@ export const CONFIG = {
     step: 0.2,
   },
   kidFleeSpeed: {
-    value: 7.2,
+    value: 6.25, // Down from 7.2 so new players can catch them
     type: 'number',
     label: 'Kids Flee Speed',
     group: 'Physics',
@@ -196,7 +194,7 @@ export const CONFIG = {
 
   // --- Audio ---
   defaultMusicVolume: {
-    value: 0.25,
+    value: 0.5,
     type: 'number',
     label: 'Default Music Volume',
     group: 'AUDIO',
@@ -208,7 +206,8 @@ export const CONFIG = {
     group: 'AUDIO',
   },
   backgroundMusicUrl: {
-    value: 'https://storage.googleapis.com/assets-gen-playground/musiclibrary/pixel_quest.mp3',
+    // Bundled with the game so the build has no outside requests.
+    value: './assets/music.mp3',
     type: 'string',
     label: 'Background Music URL',
     group: 'Audio',
@@ -240,21 +239,3 @@ export function getConfig<K extends ConfigKey>(
 ): (typeof CONFIG)[K]['value'] {
   return CONFIG[key].value;
 }
-
-export const AVAILABLE_MUSIC_TRACKS: readonly MusicTrack[] = [
-  {
-    name: 'pixel_quest',
-    url: 'https://storage.googleapis.com/assets-gen-playground/musiclibrary/pixel_quest.mp3',
-    description: 'Cheerful 8-bit chiptune with pulse-wave leads. Perfect for playful arcade chase tag.',
-  },
-  {
-    name: 'stadium_rush',
-    url: 'https://storage.googleapis.com/assets-gen-playground/musiclibrary/stadium_rush.mp3',
-    description: 'High-energy rush anthem.',
-  },
-  {
-    name: 'candy_pop',
-    url: 'https://storage.googleapis.com/assets-gen-playground/musiclibrary/candy_pop.mp3',
-    description: 'Bubbly, energetic and cute playground beats.',
-  },
-];

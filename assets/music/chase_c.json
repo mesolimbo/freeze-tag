@@ -1,0 +1,88 @@
+{
+  "song_id": "QyfHe93VGDbJ8XvevLxK",
+  "composition_plan": {
+    "chunks": [
+      {
+        "text": "[Hook - full band from the first beat]\n{gang shout} Hey!\n{wordless gang chant} Whoa-oh, whoa-oh!\n{gang shout} Hey! Hey!",
+        "duration_ms": 16000,
+        "positive_styles": [
+          "140 BPM",
+          "goofy high-energy early 1980s party rock",
+          "full band at full volume from the very first beat, no intro, no build-up",
+          "pounding four-on-the-floor drums with loud handclaps on every backbeat",
+          "bouncy cartoonish combo organ riff",
+          "honking playful saxophone stabs",
+          "boogie bass line",
+          "wordless rowdy gang shouts and chants",
+          "cheeky, silly, chase-scene energy",
+          "loud, bright, compressed mix"
+        ],
+        "negative_styles": [
+          "quiet intro",
+          "fade in",
+          "slow tempo",
+          "ballad",
+          "lyrics with words",
+          "dark",
+          "ambient"
+        ],
+        "context_adherence": "high",
+        "conditioning_ref": null,
+        "condition_strength": null
+      },
+      {
+        "text": "[Chase break]\n{gang shout} Hey!",
+        "duration_ms": 16000,
+        "positive_styles": [
+          "140 BPM",
+          "same loud full-band energy",
+          "stop-time hits where the band freezes for one beat then crashes back in",
+          "organ and sax trade silly call-and-response licks",
+          "slide whistle style organ glissando",
+          "relentless handclaps",
+          "rowdy party band"
+        ],
+        "negative_styles": [
+          "quiet",
+          "breakdown",
+          "slow",
+          "lyrics with words"
+        ],
+        "context_adherence": "high",
+        "conditioning_ref": null,
+        "condition_strength": null
+      },
+      {
+        "text": "[Hook return - loop back]\n{wordless gang chant} Whoa-oh, whoa-oh!\n{gang shout} Hey!",
+        "duration_ms": 16000,
+        "positive_styles": [
+          "140 BPM",
+          "main organ hook returns at full volume",
+          "pounding drums and handclaps",
+          "honking sax",
+          "wordless gang chant",
+          "ends at full energy mid-groove with no ending and no fade, ready to loop"
+        ],
+        "negative_styles": [
+          "ending",
+          "fade out",
+          "ritardando",
+          "quiet",
+          "lyrics with words"
+        ],
+        "context_adherence": "high",
+        "conditioning_ref": null,
+        "condition_strength": null
+      }
+    ]
+  },
+  "song_metadata": {
+    "title": null,
+    "description": null,
+    "genres": [],
+    "languages": [],
+    "is_explicit": null
+  },
+  "words_timestamps": null,
+  "waveform_visual": null
+}

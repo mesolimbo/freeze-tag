@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splash Sampler</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --ink: #1c2430;
+    --muted: #5b6675;
+    --line: #dde3ea;
+    --accent: #1e3a8a;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c;
+      --card: #1b2129;
+      --ink: #e8edf3;
+      --muted: #9aa6b4;
+      --line: #2b333e;
+      --accent: #93b4ff;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 48px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1280px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .lede { margin: 0 0 24px; color: var(--muted); max-width: 70ch; }
+  .model { margin: 28px 0 10px; font-size: 18px; }
+  .model small { font-weight: 400; color: var(--muted); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+    gap: 16px;
+  }
+  figure {
+    margin: 0;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  button.thumb {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: zoom-in;
+  }
+  button.thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+  button.thumb:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+  figcaption { padding: 10px 14px 12px; }
+  figcaption b { display: block; }
+  figcaption span { color: var(--muted); font-size: 14px; }
+  dialog {
+    width: min(96vw, 1600px);
+    max-height: 96vh;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: #000;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.8); }
+  dialog img { display: block; width: 100%; height: auto; max-height: 90vh; object-fit: contain; cursor: zoom-out; }
+  dialog p { margin: 0; padding: 8px 14px; color: #e8edf3; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Park Freeze Tag: splash candidates</h1>
+  <p class="lede">
+    Four image models each made two 16:9 images, using the same gameplay renders as references.
+    Prompt 1 asks for a wide view of the playground, and prompt 2 asks for a close action shot with frozen kids.
+    Click an image to see it full size, and press Esc or click again to close it.
+  </p>
+  <div id="gallery"></div>
+</main>
+
+<dialog id="viewer">
+  <img id="viewer-img" alt="">
+  <p id="viewer-caption"></p>
+</dialog>
+
+<script>
+  const MODELS = [
+    {
+      name: 'gpt-image',
+      engine: 'OpenAI gpt-image-2.5, 1536 × 864',
+      shots: [
+        {file: 'gpt-image_1.png', note: 'Wide view, kids scattering, one kid in a clear ice cube.'},
+        {file: 'gpt-image_2.png', note: 'Action shot, kids sprinting past two ice-encased kids.'},
+      ],
+    },
+    {
+      name: 'nano-banana',
+      engine: 'Google Gemini 3 Pro Image, 2752 × 1536',
+      shots: [
+        {file: 'nano-banana_1.jpg', note: 'Wide view with a big ice cube in front and a bouncy title.'},
+        {file: 'nano-banana_2.jpg', note: 'Close action shot with large kid faces and two frozen kids behind.'},
+      ],
+    },
+    {
+      name: 'flux-3',
+      engine: 'FLUX 3 Edit, 2048 × 1152',
+      shots: [
+        {file: 'flux-3_1.png', note: 'Wide view closest to the in-game layout, ice cube by the towers.'},
+        {file: 'flux-3_2.png', note: 'Action shot through the swing set, kid frozen in a tall ice block.'},
+      ],
+    },
+    {
+      name: 'p-image',
+      engine: 'Pruna P-Image Edit, 1376 × 768',
+      shots: [
+        {file: 'p-image_1.jpg', note: 'Wide view with a glowing freeze ring; tiny kids.'},
+        {file: 'p-image_2.jpg', note: 'Ignored the action brief and made a second wide view.'},
+      ],
+    },
+  ];
+
+  const gallery = document.getElementById('gallery');
+  const viewer = document.getElementById('viewer');
+  const viewerImg = document.getElementById('viewer-img');
+  const viewerCaption = document.getElementById('viewer-caption');
+
+  for (const model of MODELS) {
+    const heading = document.createElement('h2');
+    heading.className = 'model';
+    heading.innerHTML = `${model.name} <small>${model.engine}</small>`;
+    gallery.append(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    model.shots.forEach((shot, i) => {
+      const label = `${model.name} #${i + 1}`;
+      const figure = document.createElement('figure');
+      figure.innerHTML = `
+        <button class="thumb" type="button"><img src="${shot.file}" alt="${label}" loading="lazy"></button>
+        <figcaption><b>${label} <span>(${shot.file})</span></b><span>${shot.note}</span></figcaption>`;
+      figure.querySelector('button').addEventListener('click', () => {
+        viewerImg.src = shot.file;
+        viewerImg.alt = label;
+        viewerCaption.textContent = `${label}: ${shot.note}`;
+        viewer.showModal();
+      });
+      grid.append(figure);
+    });
+    gallery.append(grid);
+  }
+
+  viewerImg.addEventListener('click', () => viewer.close());
+  viewer.addEventListener('click', (e) => { if (e.target === viewer) viewer.close(); });
+</script>
+</body>
+</html>

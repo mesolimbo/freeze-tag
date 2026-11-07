@@ -628,27 +628,34 @@ function ShiftSteeringController({
   onFreezeKid: (idx: number) => void;
 }) {
   const {camera} = useThree();
-  const keys = useRef<Record<string, boolean>>({});
+  /** Shift keys currently held, most recent last. The most recent one steers. */
+  const held = useRef<Array<'ShiftLeft' | 'ShiftRight'>>([]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Capture Left Shift and Right Shift specifically by code
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-        e.preventDefault();
-        keys.current[e.code] = true;
-      }
+      if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
+      e.preventDefault();
+      if (e.repeat) return;
+      held.current = [...held.current.filter((c) => c !== e.code), e.code];
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-        keys.current[e.code] = false;
-      }
+      if (e.code !== 'ShiftLeft' && e.code !== 'ShiftRight') return;
+      // Windows sends no keyup for the first Shift released while the other is held, so a stale key can linger.
+      // Once the browser reports no Shift down at all, drop both.
+      held.current = e.getModifierState('Shift') ? held.current.filter((c) => c !== e.code) : [];
+    };
+    // A system dialog (such as the Sticky Keys prompt after five Shift taps) can swallow the keyup.
+    const onBlur = () => {
+      held.current = [];
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -665,9 +672,9 @@ function ShiftSteeringController({
     }
 
     const turnRate = getConfig('playerTurnRate');
-    let turnInput = 0;
-    if (keys.current['ShiftLeft']) turnInput += 1; // Turn Left
-    if (keys.current['ShiftRight']) turnInput -= 1; // Turn Right
+    // Holding both keys steers by the later one, so a quick left-to-right switch never cancels out.
+    const steering = held.current[held.current.length - 1];
+    const turnInput = steering === 'ShiftLeft' ? 1 : steering === 'ShiftRight' ? -1 : 0;
 
     playerPosRef.current.yaw += turnInput * turnRate * dt;
 
