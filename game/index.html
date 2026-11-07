@@ -13,10 +13,29 @@
         height: 100%;
         background: #09090b;
       }
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        background: #7fb8e6;
+        transition: opacity 700ms ease;
+      }
+      #splash img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        /* Keeps the title in view when a wide window crops the top and bottom. */
+        object-position: 50% 15%;
+      }
+      #splash.done {
+        opacity: 0;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="splash"><img src="./assets/splash.webp" alt="Park Freeze Tag" fetchpriority="high" /></div>
     <script type="module" src="./src/index.tsx"></script>
   </body>
 </html>

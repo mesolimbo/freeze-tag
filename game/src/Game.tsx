@@ -78,6 +78,21 @@ interface GameProps {
   onFreezeKid: (index: number) => void;
   playerPosRef: React.MutableRefObject<{x: number; y: number; z: number; yaw: number; pitch: number}>;
   kidsPosRef: React.MutableRefObject<Array<{x: number; y: number; z: number; isFrozen: boolean}>>;
+  /** Called once every model and texture has loaded and the scene has drawn. */
+  onReady: () => void;
+}
+
+/** Frames to draw before reporting ready, so shader compiles happen behind the splash instead of as a visible stall. */
+const WARMUP_FRAMES = 3;
+
+// It sits inside the Suspense boundary, so it only mounts after every loader there has resolved.
+function ReadySignal({onReady}: {onReady: () => void}) {
+  const frames = useRef(0);
+  useFrame(() => {
+    frames.current += 1;
+    if (frames.current === WARMUP_FRAMES) onReady();
+  });
+  return null;
 }
 
 // Scratch variables to avoid allocations in useFrame
@@ -777,6 +792,7 @@ export function Game({
   onFreezeKid,
   playerPosRef,
   kidsPosRef,
+  onReady,
 }: GameProps) {
   return (
     <div className="w-full h-full relative canvas-wrapper">
@@ -843,6 +859,7 @@ export function Game({
           />
 
           <AtmosphericPollen />
+          <ReadySignal onReady={onReady} />
         </Suspense>
       </Canvas>
     </div>

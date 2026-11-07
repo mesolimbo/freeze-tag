@@ -12,6 +12,8 @@ const EYE_HEIGHT = 1.6;
 const RESTART_DELAY_MS = 900;
 const TICK_MS = 100;
 const URGENT_SECONDS = 5;
+/** Matches the opacity transition on #splash in index.html. */
+const SPLASH_FADE_MS = 700;
 
 type Status = 'READY' | 'PLAYING' | 'CAUGHT_ALL' | 'TIME_UP';
 type Side = 'left' | 'right';
@@ -95,7 +97,19 @@ export default function App() {
   const [timeRemaining, setTimeRemaining] = useState(timeLimit);
   const [frozenKids, setFrozenKids] = useState<boolean[]>(() => KIDS_CONFIG.map(() => false));
   const [pressed, setPressed] = useState<Record<Side, boolean>>({left: false, right: false});
+  const [ready, setReady] = useState(false);
   const endedAt = useRef(0);
+  const handleReady = useCallback(() => setReady(true), []);
+
+  // The splash lives in index.html so it shows while the bundle downloads; fade it out once the scene is ready.
+  useEffect(() => {
+    if (!ready) return;
+    const splash = document.getElementById('splash');
+    if (!splash) return;
+    splash.classList.add('done');
+    const timer = setTimeout(() => splash.remove(), SPLASH_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [ready]);
 
   const playerPosRef = useRef(randomCornerSpawn());
   const kidsPosRef = useRef(startingKids());
@@ -120,7 +134,7 @@ export default function App() {
     const onDown = (e: KeyboardEvent) => {
       const side = sideOf(e);
       if (side) setPressed((p) => (p[side] ? p : {...p, [side]: true}));
-      if (e.repeat) return;
+      if (e.repeat || !ready) return;
       if (status === 'READY' && side) startRound();
       if ((status === 'CAUGHT_ALL' || status === 'TIME_UP') && performance.now() - endedAt.current > RESTART_DELAY_MS) {
         startRound();
@@ -136,7 +150,7 @@ export default function App() {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
     };
-  }, [status, startRound]);
+  }, [status, startRound, ready]);
 
   useEffect(() => {
     if (status === 'CAUGHT_ALL') gameAudio.playVictoryFanfare();
@@ -184,6 +198,7 @@ export default function App() {
           onFreezeKid={handleFreezeKid}
           playerPosRef={playerPosRef}
           kidsPosRef={kidsPosRef}
+          onReady={handleReady}
         />
       </div>
 
