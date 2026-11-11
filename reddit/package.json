@@ -5,16 +5,16 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
-    "build": "npm run sync-assets && vite build",
+    "build": "npm run sync-game && vite build",
     "deploy": "npm run test:types && npm run lint && devvit upload",
-    "dev": "npm run sync-assets && devvit playtest",
+    "dev": "npm run sync-game && devvit playtest",
     "launch": "npm run deploy && devvit publish",
-    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint": "eslint 'src/{client,server,shared}/**/*.{ts,tsx}'",
     "login": "devvit login",
     "prettier": "prettier --write .",
     "test:types": "tsc --build",
     "test:unit": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test \"src/**/*.test.ts\"",
-    "sync-assets": "node tools/sync-assets.mjs"
+    "sync-game": "node tools/sync-game.mjs"
   },
   "engines": {
     "node": ">=24.0.0"

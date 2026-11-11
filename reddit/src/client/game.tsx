@@ -1,7 +1,7 @@
 import './game.css';
 import {createRoot} from 'react-dom/client';
-import App from '../../../game/src/App';
-import type {LeaderboardApi} from '../../../game/src/types';
+import App from '../game/App';
+import type {LeaderboardApi} from '../game/types';
 import type {LeaderboardData} from '../shared/api';
 
 async function request(path: string, body?: unknown): Promise<LeaderboardData> {

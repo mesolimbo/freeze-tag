@@ -6,7 +6,7 @@
     "customConditions": [
       "browser"
     ],
-    "rootDir": "../..",
+    "rootDir": "../src",
     "jsx": "react-jsx",
     "types": [
       "vite/client"
@@ -17,7 +17,7 @@
   },
   "include": [
     "../src/client/**/*",
-    "../../game/src/**/*"
+    "../src/game/**/*"
   ],
   "exclude": [],
   "references": [

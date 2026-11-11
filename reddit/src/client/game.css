@@ -1,2 +1,2 @@
-@import "../../../game/src/index.css";
-@source "../../../game/src";
+@import "../game/index.css";
+@source "../game";

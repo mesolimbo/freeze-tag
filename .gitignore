@@ -6,3 +6,7 @@ __pycache__/
 node_modules/
 game/dist/
 game/release/
+
+# Copied from game/ by reddit/tools/sync-game.mjs
+reddit/src/game/
+reddit/public/assets/
