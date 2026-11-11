@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Park Freeze Tag</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        height: 100%;
+        background: #09090b;
+      }
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        /* Sky above and sand below match the art's edges where the window is not 16:9. */
+        background: linear-gradient(#7fb8e6 45%, #e6c88c 55%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 700ms ease;
+      }
+      #splash img {
+        /* The art is 16:9. Fit all of it, since Reddit's windows range from portrait to near-square, and size the box to the picture so the edge fade lands on its edges. */
+        width: min(100vw, calc(100vh * 16 / 9));
+        aspect-ratio: 16 / 9;
+        /* Fade the edges so a letterboxed image blends into the sky and sand instead of showing a seam. */
+        mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 90%, transparent),
+          linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+        mask-composite: intersect;
+        -webkit-mask-composite: source-in;
+      }
+      #splash.done {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="splash"><img src="/assets/splash.webp" alt="Park Freeze Tag" fetchpriority="high" /></div>
+    <script type="module" src="game.tsx"></script>
+  </body>
+</html>

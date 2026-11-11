@@ -42,9 +42,10 @@ function MuteButton({muted, blocked, onToggle}: {muted: boolean; blocked: boolea
         e.currentTarget.blur();
       }}
       className={`fixed right-4 z-[61] flex h-10 items-center justify-center gap-2 rounded-full bg-white/75 shadow-md shadow-sky-900/20 backdrop-blur-sm transition hover:bg-white/95 sm:right-8 ${
-        blocked ? 'pl-4 pr-3' : 'w-10'
-      }`}
-      style={{top: 'calc(4.25rem + env(safe-area-inset-top, 0px))', color: MUTE_ICON_COLOR}}>
+        // Below `sm` the HUD stacks the countdown above the controls, so the bar is taller.
+        'top-[calc(7rem+env(safe-area-inset-top,0px))] sm:top-[calc(4.25rem+env(safe-area-inset-top,0px))]'
+      } ${blocked ? 'pl-4 pr-3' : 'w-10'}`}
+      style={{color: MUTE_ICON_COLOR}}>
       {/* Chrome ignores Shift when deciding whether a page may play sound, so a Shift-only player needs this hint. */}
       {blocked && <span className="text-sm font-bold">{IS_TOUCH_DEVICE ? 'Tap' : 'Click'} for music</span>}
       <Icon size={22} strokeWidth={2.5} />
@@ -373,11 +374,11 @@ export default function App() {
         <ResultScreen won={status === 'CAUGHT_ALL'} secondsLeft={secondsLeft} />
       ) : (
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 bg-black/35 px-4 py-3 backdrop-blur-sm sm:px-8"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-black/35 px-4 py-3 backdrop-blur-sm sm:flex-nowrap sm:px-8"
           style={{paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))'}}>
           <SideControl side="left" pressed={pressed.left} />
           <div
-            className="min-w-0 flex-1 text-center text-lg font-bold text-red-400 sm:text-2xl"
+            className="order-first min-w-0 basis-full text-center text-lg font-bold text-red-400 sm:order-none sm:flex-1 sm:basis-auto sm:text-2xl"
             style={outline('#000', '0.2em')}>
             <StatusLine
               secondsLeft={secondsLeft}
