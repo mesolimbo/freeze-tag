@@ -5,6 +5,7 @@ import {getConfig, MUSIC_LOOP} from './constants';
 import {Game, KIDS_CONFIG} from './Game';
 import BackgroundMusic from './utils/BackgroundMusic';
 import {gameAudio} from './utils/helper';
+import type {LeaderboardApi, LeaderboardData} from './types';
 import {IS_TOUCH_DEVICE, touchSide} from './utils/touch';
 
 /** Distance of each spawn corner from the centre on both axes, inside the fence and clear of the corner trees. */
@@ -15,6 +16,7 @@ const RESTART_DELAY_MS = 900;
 /** Fast enough that the tenths digit never visibly skips. */
 const TICK_MS = 50;
 const URGENT_SECONDS = 5;
+const LEADERBOARD_ROWS = 5;
 /** Matches the opacity transition on #splash in index.html. */
 const SPLASH_FADE_MS = 700;
 /** A shade deeper than the sky's zenith (#4f9de0), so the icon matches the sky but still stands out against it. */
@@ -132,7 +134,42 @@ function formatSeconds(seconds: number) {
   return (Math.ceil(seconds * 10 - 1e-6) / 10).toFixed(1);
 }
 
-function ResultScreen({won, secondsLeft}: {won: boolean; secondsLeft: number}) {
+/** Top scores by time left, with the player's own place when they are outside the list. */
+function LeaderboardPanel({data}: {data: LeaderboardData | null}) {
+  const top = data?.top.slice(0, LEADERBOARD_ROWS) ?? [];
+  const me = data?.me;
+  return (
+    <div className="w-full max-w-xs rounded-2xl bg-black/45 px-4 py-3 text-base tracking-wide sm:text-xl">
+      <div className="mb-1 text-center text-lg text-yellow-300 sm:text-2xl">Fastest catches</div>
+      {data === null ? (
+        <div className="text-center opacity-80">Loading…</div>
+      ) : top.length === 0 ? (
+        <div className="text-center opacity-80">No scores yet</div>
+      ) : (
+        <ol className="space-y-0.5">
+          {top.map((entry, index) => (
+            <li
+              key={entry.username}
+              className={`flex justify-between gap-3 ${me?.rank === index + 1 ? 'text-cyan-300' : ''}`}>
+              <span className="truncate">
+                {index + 1}. {entry.username}
+              </span>
+              <span className="tabular-nums">{entry.seconds.toFixed(1)}s</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {me && me.rank > LEADERBOARD_ROWS && (
+        <div className="mt-1 flex justify-between gap-3 border-t border-white/30 pt-1 text-cyan-300">
+          <span>You: #{me.rank}</span>
+          <span className="tabular-nums">{me.seconds.toFixed(1)}s</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultScreen({won, secondsLeft, board}: {won: boolean; secondsLeft: number; board?: LeaderboardData | null | undefined}) {
   const stroke = won ? '#1e3a8a' : '#7f1d1d';
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 px-4 text-center font-fun text-white">
@@ -146,6 +183,7 @@ function ResultScreen({won, secondsLeft}: {won: boolean; secondsLeft: number}) {
           with <span className="tabular-nums">{formatSeconds(secondsLeft)}</span> seconds to spare!
         </div>
       )}
+      {board !== undefined && <LeaderboardPanel data={board} />}
       <div className="text-2xl tracking-wide sm:text-3xl" style={outline(stroke, '0.18em')}>
         {IS_TOUCH_DEVICE ? 'Tap to continue' : 'Press any key to continue'}
       </div>
@@ -173,7 +211,7 @@ function StatusLine({secondsLeft, kidsLeft, playing}: {secondsLeft: number; kids
   );
 }
 
-export default function App() {
+export default function App({leaderboard}: {leaderboard?: LeaderboardApi}) {
   const timeLimit = getConfig('timeLimit');
   const [status, setStatus] = useState<Status>('READY');
   const [timeRemaining, setTimeRemaining] = useState(timeLimit);
@@ -181,6 +219,7 @@ export default function App() {
   const [pressed, setPressed] = useState<Record<Side, boolean>>({left: false, right: false});
   const [ready, setReady] = useState(false);
   const [started, setStarted] = useState(false);
+  const [board, setBoard] = useState<LeaderboardData | null>(null);
   // Once the first round starts the music keeps going through results and restarts.
   const [musicStarted, setMusicStarted] = useState(false);
   const [musicMuted, setMusicMuted] = useState(false);
@@ -205,6 +244,7 @@ export default function App() {
     playerPosRef.current = randomCornerSpawn();
     kidsPosRef.current = startingKids();
     setFrozenKids(KIDS_CONFIG.map(() => false));
+    setBoard(null);
     roundStartedAt.current = performance.now();
     roundOverRef.current = false;
     setTimeRemaining(timeLimit);
@@ -305,6 +345,16 @@ export default function App() {
     if (status === 'TIME_UP') gameAudio.playDefeatMotif();
   }, [status]);
 
+  useEffect(() => {
+    if (!leaderboard || (status !== 'CAUGHT_ALL' && status !== 'TIME_UP')) return;
+    let stale = false;
+    const request = status === 'CAUGHT_ALL' ? leaderboard.submit(timeRemaining) : leaderboard.load();
+    request.then((data) => !stale && setBoard(data)).catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [leaderboard, status, timeRemaining]);
+
   const handleFreezeKid = useCallback(
     (index: number) => {
       setFrozenKids((previous) => {
@@ -371,7 +421,7 @@ export default function App() {
       />
 
       {roundOver ? (
-        <ResultScreen won={status === 'CAUGHT_ALL'} secondsLeft={secondsLeft} />
+        <ResultScreen won={status === 'CAUGHT_ALL'} secondsLeft={secondsLeft} board={leaderboard ? board : undefined} />
       ) : (
         <div
           className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-black/35 px-4 py-3 backdrop-blur-sm sm:flex-nowrap sm:px-8"

@@ -3,10 +3,22 @@
   "compilerOptions": {
     "outDir": "../dist/types/client",
     "tsBuildInfoFile": "../dist/types/client/tsconfig.tsbuildinfo",
-    "customConditions": ["browser"],
-    "rootDir": "../src/client"
+    "customConditions": [
+      "browser"
+    ],
+    "rootDir": "../..",
+    "jsx": "react-jsx",
+    "types": [
+      "vite/client"
+    ],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "noUnusedParameters": false
   },
-  "include": ["../src/client/**/*"],
+  "include": [
+    "../src/client/**/*",
+    "../../game/src/**/*"
+  ],
   "exclude": [],
   "references": [
     {

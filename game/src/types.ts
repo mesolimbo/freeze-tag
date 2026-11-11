@@ -35,3 +35,15 @@ export interface Particle {
 }
 
 // Add specific game types below
+
+export interface LeaderboardData {
+  top: {username: string; seconds: number}[];
+  /** Absent when the player has no recorded win yet. */
+  me?: {rank: number; seconds: number};
+}
+
+/** Supplied by hosts that keep scores (the Reddit build). `seconds` is time left on the clock, so higher is faster. */
+export interface LeaderboardApi {
+  submit(secondsLeft: number): Promise<LeaderboardData>;
+  load(): Promise<LeaderboardData>;
+}
