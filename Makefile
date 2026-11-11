@@ -13,10 +13,14 @@ help:
 install:
 	npm --prefix game install
 
-serve:
+game/node_modules: game/package.json game/package-lock.json
+	npm --prefix game install
+	@touch $@
+
+serve: game/node_modules
 	npm --prefix game run dev
 
-build:
+build: game/node_modules
 	npm --prefix game run build
 
 preview: build
