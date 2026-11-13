@@ -134,8 +134,8 @@ def convert_images():
 
 
 # The Roblox importer keeps the kid's skeleton but drops its animation clips, so they travel as a Luau table that the
-# game samples to pose the bones. Open Cloud cannot upload scripts, so paste roblox/KidClips.luau into the
-# ReplicatedStorage.FreezeTag.KidClips ModuleScript. Slow clips keep every Nth frame to stay small; the step must
+# game samples to pose the bones. Open Cloud cannot upload scripts, so paste the generated KidClips.luau (under
+# roblox/src) into the ReplicatedStorage.FreezeTag.KidClips ModuleScript. Slow clips keep every Nth frame to stay small; the step must
 # divide the clip's last frame so the loop point survives.
 FRAME_STEP = {'idle': 12, 'walk': 2}
 COMPONENTS = {'SCALAR': 1, 'VEC3': 3, 'VEC4': 4}
@@ -192,7 +192,8 @@ def convert_kid_clips():
         'return {',
     ]
     source = '\n'.join(header + clips + ['}', ''])
-    (ROOT / 'roblox' / 'KidClips.luau').write_text(source.replace('-0,', '0,').replace('-0}', '0}'))
+    target = ROOT / 'roblox' / 'src' / 'ReplicatedStorage' / 'FreezeTag' / 'KidClips.luau'
+    target.write_text(source.replace('-0,', '0,').replace('-0}', '0}'))
 
 
 def main():

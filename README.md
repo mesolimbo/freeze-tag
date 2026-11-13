@@ -49,6 +49,8 @@ The Blender scenes live in `models.blend` (full detail) and `models_low.blend` (
 
 [`raw/`](raw) holds the original version of the game this one was rebuilt from.
 
+A Roblox port lives in a Roblox Studio place. [`roblox/src`](roblox/src) mirrors its Luau scripts, laid out by the service each one sits in. `tools/roblox_assets.py` and `tools/roblox_sfx.py` convert the models, textures, animation clips and sound effects into forms Roblox accepts.
+
 ## Credits
 
 - Title font: [Luckiest Guy](https://fonts.google.com/specimen/Luckiest+Guy) by Astigmatic (Apache License 2.0)
