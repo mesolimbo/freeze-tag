@@ -136,6 +136,11 @@ function KidView:setFrozen(frozen: boolean)
 	self.ice.Parent = if frozen then self.parent else nil
 end
 
+-- Tints the ice block to go with the player's freeze ring.
+function KidView:setIceColor(ringColor: Color3)
+	self.ice.PrimaryPart.Color = ringColor:Lerp(Color3.new(1, 1, 1), 0.55)
+end
+
 -- Advances the animation and moves the kid to (x, z) in metres, turned by rotY radians.
 function KidView:update(dt: number, x: number, z: number, rotY: number)
 	local clip = clips[self.clipName]

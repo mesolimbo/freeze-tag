@@ -1,13 +1,18 @@
--- Everything drawn over the 3D view: the splash, the status bar, the result screen and the music button.
+-- Everything drawn over the 3D view: the splash, the status bar, the result screen, the ring picker and the music button.
 local GuiService = game:GetService("GuiService")
 local TweenService = game:GetService("TweenService")
 
+local Rewards = require(script.Parent.Rewards)
+
 local SPLASH_IMAGE = "rbxassetid://77939503309121"
+local SPLASH_ASPECT = 16 / 9
 local SPLASH_FADE_SECONDS = 0.7
 local LEADERBOARD_ROWS = 5
 local URGENT_SECONDS = 5
 -- Below this width the status line gets a row of its own above the control hints.
 local NARROW_WIDTH = 640
+-- Below this height (a phone held sideways) the result screen shows one leaderboard, not two.
+local SHORT_HEIGHT = 450
 
 local WHITE = Color3.new(1, 1, 1)
 local BLACK = Color3.new(0, 0, 0)
@@ -17,6 +22,14 @@ local SLATE = Color3.fromRGB(15, 23, 42)
 local WIN_STROKE = Color3.fromRGB(30, 58, 138)
 local LOSE_STROKE = Color3.fromRGB(127, 29, 29)
 local RED_TAG = '<font color="#ef4444"><b>%s</b></font>'
+local BOARD_TITLES = { weekly = "This week", allTime = "All time" }
+local RAINBOW = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 0.75, 1)),
+	ColorSequenceKeypoint.new(0.25, Color3.fromHSV(0.15, 0.75, 1)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.4, 0.75, 1)),
+	ColorSequenceKeypoint.new(0.75, Color3.fromHSV(0.6, 0.75, 1)),
+	ColorSequenceKeypoint.new(1, Color3.fromHSV(0.8, 0.75, 1)),
+})
 
 local function make(className: string, properties: { [string]: any }, parent: Instance?): any
 	local instance = Instance.new(className)
@@ -47,7 +60,18 @@ local Hud = {}
 Hud.__index = Hud
 
 function Hud.new(playerGui: PlayerGui, isTouch: boolean)
-	local self = setmetatable({ isTouch = isTouch, muted = false, onMuteToggled = nil, onSplashClicked = nil }, Hud)
+	local self = setmetatable({
+		isTouch = isTouch,
+		muted = false,
+		onMuteToggled = nil,
+		onSplashClicked = nil,
+		onRingSelected = nil,
+		onInviteClicked = nil,
+		onResultTapped = nil,
+		inviteAvailable = false,
+		unlockedRings = { [Rewards.DEFAULT_RING] = true },
+		selectedRing = Rewards.DEFAULT_RING,
+	}, Hud)
 
 	local gui = make("ScreenGui", {
 		Name = "FreezeTagHud",
@@ -70,6 +94,20 @@ function Hud.new(playerGui: PlayerGui, isTouch: boolean)
 	}, self.bar, BLACK)
 	self.sides = { left = self:_sideControl("left"), right = self:_sideControl("right") }
 
+	-- Catches the tap or click that continues after a round. It sits under the menus, so a tap on one of them stays there.
+	self.backdrop = make("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "",
+		Visible = false,
+		ZIndex = 4,
+	}, gui)
+	self.backdrop.Activated:Connect(function()
+		if self.onResultTapped then
+			self.onResultTapped()
+		end
+	end)
+
 	self.result = make("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, ZIndex = 4 }, gui)
 	make("UIListLayout", {
 		FillDirection = Enum.FillDirection.Vertical,
@@ -80,37 +118,52 @@ function Hud.new(playerGui: PlayerGui, isTouch: boolean)
 	}, self.result)
 	self.title = label({ LayoutOrder = 1, AutomaticSize = Enum.AutomaticSize.XY }, self.result, WIN_STROKE)
 	self.spare = label({ LayoutOrder = 2, AutomaticSize = Enum.AutomaticSize.XY }, self.result, WIN_STROKE)
-	self.board = make("Frame", {
+	self.unlocked = label({
 		LayoutOrder = 3,
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = BLACK,
-		BackgroundTransparency = 0.55,
+		AutomaticSize = Enum.AutomaticSize.XY,
+		TextColor3 = YELLOW,
+		Visible = false,
+	}, self.result, WIN_STROKE)
+	self.boards = make("Frame", {
+		LayoutOrder = 4,
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundTransparency = 1,
 		Visible = false,
 	}, self.result)
-	make("UICorner", { CornerRadius = UDim.new(0, 16) }, self.board)
-	make("UIPadding", {
-		PaddingTop = UDim.new(0, 10),
-		PaddingBottom = UDim.new(0, 10),
-		PaddingLeft = UDim.new(0, 16),
-		PaddingRight = UDim.new(0, 16),
-	}, self.board)
-	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, self.board)
-	self.continue = label({ LayoutOrder = 4, AutomaticSize = Enum.AutomaticSize.XY }, self.result, WIN_STROKE)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 12),
+	}, self.boards)
+	self.panels = { weekly = self:_boardPanel(1), allTime = self:_boardPanel(2) }
+	self.continue = label({ LayoutOrder = 5, AutomaticSize = Enum.AutomaticSize.XY }, self.result, WIN_STROKE)
 	self.continue.Text = if isTouch then "Tap to continue" else "Press any key to continue"
 
 	self.splash = make("ImageButton", {
 		Size = UDim2.fromScale(1, 1),
-		Image = SPLASH_IMAGE,
-		ScaleType = Enum.ScaleType.Crop,
 		BackgroundColor3 = Color3.fromRGB(135, 206, 235),
 		BorderSizePixel = 0,
 		AutoButtonColor = false,
 		ZIndex = 50,
 	}, gui)
+	-- The art fills the whole screen and hangs from its top edge, so a wide phone crops the sand, not the title.
+	-- The HUD itself stays inside the phone's safe area, so an empty full-screen gui measures the glass for it.
+	self.screen = make("ScreenGui", {
+		Name = "FreezeTagScreen",
+		ScreenInsets = Enum.ScreenInsets.None,
+		ResetOnSpawn = false,
+	}, playerGui)
+	gui.ClipToDeviceSafeArea = false
+	self.art = make("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Image = SPLASH_IMAGE,
+		BackgroundTransparency = 1,
+		ZIndex = 50,
+	}, self.splash)
 	self.prompt = label({
 		Text = "Loading…",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.fromScale(0.5, 0.92),
+		Position = UDim2.fromScale(0.5, 0.8),
 		AutomaticSize = Enum.AutomaticSize.XY,
 		TextTransparency = 0.2,
 		ZIndex = 51,
@@ -137,12 +190,176 @@ function Hud.new(playerGui: PlayerGui, isTouch: boolean)
 		end
 	end)
 
+	-- Stats and the freeze-ring picker, shown on the splash and the result screen.
+	self.picker = make("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundColor3 = BLACK,
+		BackgroundTransparency = 0.5,
+		-- Active, so a click between the swatches does not fall through to the splash and start the round.
+		Active = true,
+		ZIndex = 62,
+	}, gui)
+	make("UICorner", { CornerRadius = UDim.new(0, 12) }, self.picker)
+	make("UIPadding", {
+		PaddingTop = UDim.new(0, 8),
+		PaddingBottom = UDim.new(0, 8),
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+	}, self.picker)
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5) }, self.picker)
+	local pickerText = { Font = Enum.Font.GothamBold, AutomaticSize = Enum.AutomaticSize.XY, ZIndex = 63 }
+	self.statsLine = label(pickerText, self.picker)
+	self.statsLine.LayoutOrder = 1
+	self.statsLine.Visible = false
+	self.ringCaption = label(pickerText, self.picker)
+	self.ringCaption.LayoutOrder = 2
+	local swatchRow = make("Frame", {
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundTransparency = 1,
+		LayoutOrder = 3,
+		ZIndex = 63,
+	}, self.picker)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 6),
+	}, swatchRow)
+	self.swatches = {}
+	for index, ring in Rewards.RINGS do
+		local swatch = make("TextButton", {
+			Text = "",
+			BackgroundColor3 = ring.color,
+			AutoButtonColor = false,
+			LayoutOrder = index,
+			ZIndex = 63,
+		}, swatchRow)
+		make("UICorner", { CornerRadius = UDim.new(0.5, 0) }, swatch)
+		make("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Color = WHITE, Thickness = 0 }, swatch)
+		if ring.rainbow then
+			make("UIGradient", { Color = RAINBOW }, swatch)
+		end
+		swatch.Activated:Connect(function()
+			self:_swatchClicked(ring)
+		end)
+		self.swatches[ring.id] = swatch
+	end
+	self:_refreshPicker()
+
+	-- Opens Roblox's invite sheet. Hidden until the client learns this player is allowed to send invites.
+	self.invite = make("TextButton", {
+		AnchorPoint = Vector2.new(1, 1),
+		AutomaticSize = Enum.AutomaticSize.XY,
+		BackgroundColor3 = BLACK,
+		BackgroundTransparency = 0.5,
+		Text = "Challenge a friend",
+		TextColor3 = WHITE,
+		Font = Enum.Font.GothamBold,
+		Visible = false,
+		ZIndex = 62,
+	}, gui)
+	make("UICorner", { CornerRadius = UDim.new(0, 12) }, self.invite)
+	make("UIPadding", {
+		PaddingTop = UDim.new(0, 10),
+		PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 14),
+		PaddingRight = UDim.new(0, 14),
+	}, self.invite)
+	self.invite.Activated:Connect(function()
+		if self.onInviteClicked then
+			self.onInviteClicked()
+		end
+	end)
+
 	local camera = workspace.CurrentCamera
 	camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 		self:_layout()
 	end)
+	self.screen:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		self:_layout()
+	end)
 	self:_layout()
 	return self
+end
+
+function Hud:_boardPanel(order: number): Frame
+	local panel = make("Frame", {
+		LayoutOrder = order,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = BLACK,
+		BackgroundTransparency = 0.55,
+	}, self.boards)
+	make("UICorner", { CornerRadius = UDim.new(0, 16) }, panel)
+	make("UIPadding", {
+		PaddingTop = UDim.new(0, 10),
+		PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 16),
+		PaddingRight = UDim.new(0, 16),
+	}, panel)
+	make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, panel)
+	return panel
+end
+
+function Hud:_swatchClicked(ring)
+	if self.unlockedRings[ring.id] then
+		self.selectedRing = ring.id
+		self.lockedHint = nil
+		if self.onRingSelected then
+			self.onRingSelected(ring.id)
+		end
+	else
+		self.lockedHint = ring.name .. ": " .. ring.goal
+	end
+	self:_refreshPicker()
+end
+
+function Hud:_refreshPicker()
+	for id, swatch in self.swatches do
+		local unlocked = self.unlockedRings[id] == true
+		swatch.BackgroundTransparency = if unlocked then 0 else 0.7
+		swatch.Text = if unlocked then "" else "🔒"
+		swatch.UIStroke.Thickness = if id == self.selectedRing then 3 else 0
+	end
+	self.ringCaption.Text = self.lockedHint or ("Freeze ring: " .. Rewards.ring(self.selectedRing).name)
+	self.ringCaption.TextColor3 = if self.lockedHint then YELLOW else WHITE
+end
+
+-- profile is { stats, rings = { ring ids the player has unlocked }, ring = the one they picked }.
+function Hud:setProfile(profile)
+	local stats = profile.stats
+	self.statsLine.Text = string.format(
+		"Wins %d    Streak %d    Best %s    Frozen %d",
+		stats.wins,
+		stats.streak,
+		if stats.bestSeconds > 0 then string.format("%.1fs", stats.bestSeconds) else "-",
+		stats.kidsFrozen
+	)
+	self.statsLine.Visible = true
+	self.unlockedRings = {}
+	for _, id in profile.rings do
+		self.unlockedRings[id] = true
+	end
+	self.selectedRing = profile.ring
+	self.lockedHint = nil
+	self:_refreshPicker()
+end
+
+-- The picker and the invite button share the splash and the result screen.
+function Hud:_showMenus(visible: boolean)
+	self.picker.Visible = visible
+	self.invite.Visible = visible and self.inviteAvailable
+end
+
+function Hud:setInviteAvailable(available: boolean)
+	self.inviteAvailable = available
+	self.invite.Visible = available and self.picker.Visible
+end
+
+function Hud:showUnlocks(ringNames: { string })
+	if #ringNames > 0 then
+		self.unlocked.Text = "New freeze ring: " .. table.concat(ringNames, ", ") .. "!"
+		self.unlocked.Visible = true
+	end
 end
 
 -- The control hint: an arrow, a Shift keycap ("tap" on touch screens) and the side's name.
@@ -200,7 +417,8 @@ end
 
 function Hud:_layout()
 	local viewport = workspace.CurrentCamera.ViewportSize
-	local unit = math.clamp(viewport.Y / 720, 0.55, 1.6)
+	-- A phone held sideways is short but seen up close, so text there does not shrink as far.
+	local unit = math.clamp(viewport.Y / 720, if self.isTouch then 0.7 else 0.55, 1.6)
 	local narrow = viewport.X < NARROW_WIDTH
 	-- Roblox draws its own menu button in this strip at the top.
 	local inset = GuiService:GetGuiInset().Y
@@ -221,23 +439,44 @@ function Hud:_layout()
 		control.name.TextSize = math.round(15 * unit)
 	end
 
-	local button = math.round(40 * unit)
+	-- Big enough for a fingertip.
+	local minTarget = if self.isTouch then 32 else 0
+	local button = math.max(minTarget, math.round(40 * unit))
 	self.mute.Size = UDim2.fromOffset(button, button)
 	self.mute.Position = UDim2.new(1, -margin, 0, inset + barHeight + 12)
 	self.mute.TextSize = math.round(20 * unit)
 
+	-- Match whichever side leaves no gap: the width on screens wider than the art, the height on taller ones.
+	local screen = self.screen.AbsoluteSize
+	if screen.X == 0 or screen.Y == 0 then
+		screen = viewport
+	end
+	local corner = self.screen.AbsolutePosition - self.gui.AbsolutePosition
+	local artWidth = math.max(screen.X, screen.Y * SPLASH_ASPECT)
+	self.art.Size = UDim2.fromOffset(math.ceil(artWidth), math.ceil(artWidth / SPLASH_ASPECT))
+	self.art.Position = UDim2.fromOffset(corner.X + screen.X / 2, corner.Y)
 	self.prompt.TextSize = math.round((if narrow then 30 else 48) * unit)
 	self.title.TextSize = math.round((if narrow then 72 else 120) * unit)
 	self.spare.TextSize = math.round((if narrow then 30 else 46) * unit)
 	self.continue.TextSize = math.round((if narrow then 24 else 30) * unit)
 	self.boardTextSize = math.round((if narrow then 16 else 20) * unit)
-	self.board.Size = UDim2.fromOffset(math.round(320 * unit), 0)
-	for _, child in self.board:GetChildren() do
-		if child:IsA("TextLabel") then
-			child.TextSize = self.boardTextSize
-			child.Size = UDim2.new(1, 0, 0, self.boardTextSize + 6)
-		end
+	for kind, panel in self.panels do
+		panel.Size = UDim2.fromOffset(math.round(280 * unit), 0)
+		-- There is room for one board on a narrow or short screen, and the weekly one is the one a player can climb.
+		panel.Visible = kind == "weekly" or not (narrow or viewport.Y < SHORT_HEIGHT)
 	end
+	self.unlocked.TextSize = math.round((if narrow then 22 else 30) * unit)
+
+	self.picker.Position = UDim2.new(0, margin / 2, 1, -12)
+	self.statsLine.TextSize = math.round(14 * unit)
+	self.ringCaption.TextSize = math.round(14 * unit)
+	local swatchSize = math.max(minTarget, math.round(30 * unit))
+	for _, swatch in self.swatches do
+		swatch.Size = UDim2.fromOffset(swatchSize, swatchSize)
+		swatch.TextSize = math.round(14 * unit)
+	end
+	self.invite.Position = UDim2.new(1, -margin / 2, 1, -12)
+	self.invite.TextSize = math.round(16 * unit)
 end
 
 -- Call every frame: the start prompt and the result title blink slowly, and the clock pulses when time is short.
@@ -260,8 +499,10 @@ end
 -- Fades the splash out, then calls done.
 function Hud:leaveSplash(done: () -> ())
 	self.leaving = true
+	self:_showMenus(false)
 	local info = TweenInfo.new(SPLASH_FADE_SECONDS)
-	TweenService:Create(self.splash, info, { ImageTransparency = 1, BackgroundTransparency = 1 }):Play()
+	TweenService:Create(self.splash, info, { BackgroundTransparency = 1 }):Play()
+	TweenService:Create(self.art, info, { ImageTransparency = 1 }):Play()
 	TweenService:Create(self.prompt, info, { TextTransparency = 1 }):Play()
 	TweenService:Create(self.prompt.UIStroke, info, { Transparency = 1 }):Play()
 	task.delay(SPLASH_FADE_SECONDS, function()
@@ -300,31 +541,44 @@ function Hud:showResult(won: boolean, secondsLeft: number)
 	self.title.Text = if won then "You Win!" else "You Lost!"
 	self.spare.Text = "with " .. formatSeconds(secondsLeft) .. " seconds to spare!"
 	self.spare.Visible = won
-	for _, text in { self.title, self.spare, self.continue } do
+	for _, text in { self.title, self.spare, self.unlocked, self.continue } do
 		text.UIStroke.Color = stroke
 	end
 	self.tint.BackgroundColor3 = if won then Color3.fromRGB(186, 230, 253) else Color3.fromRGB(252, 165, 165)
 	TweenService:Create(self.tint, TweenInfo.new(0.5), { BackgroundTransparency = if won then 0.6 else 0.65 }):Play()
-	self.board.Visible = false
+	self.boards.Visible = false
+	self.unlocked.Visible = false
 	self.bar.Visible = false
 	self.result.Visible = true
+	self.backdrop.Visible = true
+	self:_showMenus(true)
 end
 
 function Hud:hideResult()
 	TweenService:Create(self.tint, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
 	self.result.Visible = false
+	self.backdrop.Visible = false
+	self:_showMenus(false)
 	self.bar.Visible = true
 end
 
 -- For when the scores cannot be read, such as in Studio without API access.
-function Hud:hideBoard()
-	self.board.Visible = false
+function Hud:hideBoards()
+	self.boards.Visible = false
+end
+
+-- data is { weekly = board, allTime = board }, or nil while the boards load.
+function Hud:setBoards(data)
+	for kind, panel in self.panels do
+		self:_fillPanel(panel, BOARD_TITLES[kind], if data then data[kind] else nil)
+	end
+	self.boards.Visible = true
 end
 
 -- Top scores by time left, with the player's own place when they are outside the list.
 -- data is { top = { { username, seconds } }, me = { rank?, seconds }? }, or nil while it loads.
-function Hud:setBoard(data)
-	for _, child in self.board:GetChildren() do
+function Hud:_fillPanel(panel: Frame, title: string, data)
+	for _, child in panel:GetChildren() do
 		if child:IsA("TextLabel") then
 			child:Destroy()
 		end
@@ -339,7 +593,7 @@ function Hud:setBoard(data)
 			Size = UDim2.new(1, 0, 0, self.boardTextSize + 6),
 			LayoutOrder = order,
 			ZIndex = 5,
-		}, self.board)
+		}, panel)
 	end
 	local function row(order: number, name: string, seconds: number, color: Color3?)
 		local left = line(order, name, color, Enum.TextXAlignment.Left)
@@ -353,7 +607,7 @@ function Hud:setBoard(data)
 		}, left)
 	end
 
-	line(0, "Fastest catches", YELLOW)
+	line(0, title, YELLOW)
 	if data == nil then
 		line(1, "Loading…")
 	elseif #data.top == 0 then
@@ -368,7 +622,6 @@ function Hud:setBoard(data)
 			row(LEADERBOARD_ROWS + 1, if me.rank then "You: #" .. me.rank else "Your best", me.seconds, CYAN)
 		end
 	end
-	self.board.Visible = true
 end
 
 return Hud

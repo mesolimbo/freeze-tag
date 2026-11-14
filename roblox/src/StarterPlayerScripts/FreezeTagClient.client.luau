@@ -1,9 +1,11 @@
 -- Park Freeze Tag: you are "it". You never stop running, and the Shift keys are the only way to steer.
--- Each player runs their own round on their own screen; the server only keeps the leaderboard.
+-- Each player runs their own round on their own screen; the server keeps their progress and the leaderboards.
 local ContentProvider = game:GetService("ContentProvider")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SocialService = game:GetService("SocialService")
 local SoundService = game:GetService("SoundService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
@@ -13,6 +15,7 @@ local Config = require(shared:WaitForChild("Config"))
 local Sim = require(shared:WaitForChild("Sim"))
 local KidView = require(shared:WaitForChild("KidView"))
 local Hud = require(shared:WaitForChild("Hud"))
+local Rewards = require(shared:WaitForChild("Rewards"))
 local remotes = shared:WaitForChild("Remotes")
 
 local S = Config.STUDS_PER_METRE
@@ -52,6 +55,24 @@ local hud = Hud.new(player:WaitForChild("PlayerGui"), isTouch)
 for _, coreGui in { Enum.CoreGuiType.Backpack, Enum.CoreGuiType.Health, Enum.CoreGuiType.PlayerList, Enum.CoreGuiType.EmotesMenu } do
 	StarterGui:SetCoreGuiEnabled(coreGui, false)
 end
+-- There is no avatar to move, so Roblox's thumbstick and jump button would only get in the way of steering taps.
+GuiService.TouchControlsEnabled = false
+
+-- Friends -----------------------------------------------------------------------
+
+local inviteOptions = Instance.new("ExperienceInviteOptions")
+inviteOptions.PromptMessage = "Challenge a friend to beat your time"
+hud.onInviteClicked = function()
+	pcall(function()
+		SocialService:PromptGameInvite(player, inviteOptions)
+	end)
+end
+task.spawn(function()
+	local ok, allowed = pcall(function()
+		return SocialService:CanSendGameInviteAsync(player)
+	end)
+	hud:setInviteAvailable(ok and allowed == true)
+end)
 
 -- Sound ---------------------------------------------------------------------
 
@@ -185,6 +206,34 @@ for index, data in Config.KIDS do
 	}
 end
 
+-- The freeze ring the player picked: its colour shows on the ring and tints the ice.
+local ring = Rewards.ring(Rewards.DEFAULT_RING)
+
+local function useRing(ringId: string)
+	ring = Rewards.ring(ringId) or ring
+	for _, segment in ringSegments do
+		segment.Color = ring.color
+	end
+	for _, kid in kids do
+		kid.view:setIceColor(ring.color)
+	end
+end
+
+hud.onRingSelected = function(ringId: string)
+	useRing(ringId)
+	remotes.SelectRing:FireServer(ringId)
+end
+
+task.spawn(function()
+	local ok, profile = pcall(function()
+		return remotes.Profile:InvokeServer()
+	end)
+	if ok and profile then
+		hud:setProfile(profile)
+		useRing(profile.ring)
+	end
+end)
+
 local function kidsLeft(): number
 	local count = 0
 	for _, kid in kids do
@@ -227,18 +276,24 @@ local function endRound(result: Status)
 	timeRemaining = if won then secondsLeftNow() else 0
 	playSound(if won then "victory" else "defeat")
 	hud:showResult(won, timeRemaining)
-	hud:setBoard(nil)
+	hud:setBoards(nil)
 
-	local round, seconds = roundNumber, timeRemaining
+	local round, seconds, frozen = roundNumber, timeRemaining, #kids - kidsLeft()
 	task.spawn(function()
-		local ok, data = pcall(function()
-			return remotes.Leaderboard:InvokeServer(if won then "submit" else "load", seconds)
+		local ok, outcome = pcall(function()
+			return remotes.RoundEnded:InvokeServer(won, seconds, frozen)
 		end)
+		if not (ok and outcome) then
+			hud:hideBoards()
+			return
+		end
+		hud:setProfile(outcome.profile)
 		if round == roundNumber and status ~= "PLAYING" then
-			if ok and data then
-				hud:setBoard(data)
+			hud:showUnlocks(outcome.unlocked)
+			if outcome.boards then
+				hud:setBoards(outcome.boards)
 			else
-				hud:hideBoard()
+				hud:hideBoards()
 			end
 		end
 	end)
@@ -257,6 +312,13 @@ hud.onSplashClicked = leaveSplash
 
 local function roundOverAndSettled(): boolean
 	return (status == "CAUGHT_ALL" or status == "TIME_UP") and os.clock() - endedAt > RESTART_DELAY
+end
+
+-- A tap or click on the result screen, anywhere but the menus, plays again.
+hud.onResultTapped = function()
+	if roundOverAndSettled() then
+		startRound()
+	end
 end
 
 -- Input -----------------------------------------------------------------------
@@ -313,9 +375,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		local side = if input.Position.X < camera.ViewportSize.X / 2 then "left" else "right"
 		touches[input] = side
 		refreshHeld(side)
-		if started and roundOverAndSettled() then
-			startRound()
-		end
 	end
 end)
 
@@ -516,6 +575,11 @@ local function step(frameSeconds: number)
 		ringCFrames[i] = ringCentre * CFrame.Angles(0, i / RING_SEGMENTS * math.pi * 2, 0) * CFrame.new(0, 0, -pulse)
 	end
 	workspace:BulkMoveTo(ringSegments, ringCFrames, Enum.BulkMoveMode.FireCFrameChanged)
+	if ring.rainbow then
+		for i, segment in ringSegments do
+			segment.Color = Rewards.colorAt(ring, now + i / RING_SEGMENTS * 4)
+		end
+	end
 
 	for i, mote in pollen do
 		pollenCFrames[i] = CFrame.new(mote.x * S, (mote.y + math.sin(now * mote.speed + mote.phase) * 0.4) * S, mote.z * S)
